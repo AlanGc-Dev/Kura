@@ -11,19 +11,16 @@ use evaluator::{Entorno, evaluar_programa};
 fn main() {
     // Escribimos un pequeño programa en Kura
     let codigo_kura = "
-        let mut vida: int = 100;
-        let danio: int = 15;
-        
-        vida = vida - danio;
-        
-        if vida > 0 {
-            print(vida);
-            print(true);
-        } else {
-            print(false);
-        }
-    ";
+        let mut horda: Arreglo = [\"Goblin\", \"Orco\", \"Dragon\"];
+        let edades: Arreglo = [15, 45, 1000];
 
+        print(horda);
+        print(edades);
+
+        let jefe: str = horda[2];
+        print(\"El jefe es:\");
+        print(jefe);
+    ";
     println!("Iniciando Kura Engine...\n");
 
     // 1. Lexer: Convierte el texto en Tokens

@@ -8,6 +8,8 @@ pub enum ObjetoKura {
     Entero(i64),
     Booleano(bool), // <-- NUEVO
     Nulo,
+    Cadena(String),
+    Arreglo(Vec<ObjetoKura>),
 }
 
 // 2. Esta es la "Memoria RAM" de tu lenguaje
@@ -51,8 +53,23 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) {
             let valor_evaluado = evaluar_expresion(valor, entorno);
             match valor_evaluado {
                 ObjetoKura::Entero(n) => println!("{}", n),
-                ObjetoKura::Booleano(b) => println!("{}", b), // <-- ¡Esta es la línea que faltaba!
-                ObjetoKura::Nulo => println!("null (variable no encontrada)"),
+                ObjetoKura::Booleano(b) => println!("{}", b),
+                ObjetoKura::Cadena(texto) => println!("{}", texto),// <-- ¡Esta es la línea que faltaba!
+                ObjetoKura::Arreglo(arr) => {
+                    // Imprimimos la lista estilo Rust/Python: [1, 2, 3]
+                    print!("[");
+                    for (i, el) in arr.iter().enumerate() {
+                        match el {
+                            ObjetoKura::Entero(n) => print!("{}", n),
+                            ObjetoKura::Booleano(b) => print!("{}", b),
+                            ObjetoKura::Cadena(t) => print!("\"{}\"", t),
+                            _ => print!("null"),
+                        }
+                        if i < arr.len() - 1 { print!(", "); }
+                    }
+                    println!("]");
+                }
+                ObjetoKura::Nulo => println!("null"),
             }
         }
         // <-- ¡NUEVO BLOQUE REASIGNACION! -->
@@ -97,8 +114,29 @@ fn evaluar_expresion(expresion: Expresion, entorno: &Entorno) -> ObjetoKura {
     match expresion {
         Expresion::Entero(n) => ObjetoKura::Entero(n),
         Expresion::Booleano(b) => ObjetoKura::Booleano(b),
+        Expresion::Cadena(texto) => ObjetoKura::Cadena(texto),
+        Expresion::Arreglo(elementos) => {
+            let mut evaluados = Vec::new();
+            for el in elementos {
+                evaluados.push(evaluar_expresion(el, entorno));
+            }
+            ObjetoKura::Arreglo(evaluados)
+        }
+        
         Expresion::Identificador(nombre) => {
             entorno.obtener(&nombre).unwrap_or(ObjetoKura::Nulo)
+        }
+        Expresion::Indice { estructura, indice } => {
+            let estructura_evaluada = evaluar_expresion(*estructura, entorno);
+            let indice_evaluado = evaluar_expresion(*indice, entorno);
+
+            // Si es un arreglo y el índice es un número entero
+            if let (ObjetoKura::Arreglo(arr), ObjetoKura::Entero(i)) = (estructura_evaluada, indice_evaluado) {
+                if i >= 0 && (i as usize) < arr.len() {
+                    return arr[i as usize].clone();
+                }
+            }
+            ObjetoKura::Nulo // Si el índice no existe o hay error, devuelve Nulo
         }
         Expresion::Operacion { izquierda, operador, derecha } => {
             let izq_val = evaluar_expresion(*izquierda, entorno);

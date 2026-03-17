@@ -35,10 +35,17 @@ pub enum Declaracion {
 pub enum Expresion {
     Entero(i64),
     Identificador(String),
-    Booleano(bool), // <-- NUEVO
+    Booleano(bool),
+    Cadena(String),
+    Arreglo(Vec<Expresion>), // <-- NUEVO: Para [1, 2, 3]
+    Indice {                 // <-- NUEVO: Para lista[0]
+        estructura: Box<Expresion>,
+        indice: Box<Expresion>
+    },
     Operacion {     // <-- NUEVO (ej: 10 + 5)
         izquierda: Box<Expresion>, // Box es necesario en Rust para estructuras recursivas
         operador: Token,
         derecha: Box<Expresion>,
-    }
+    },
+    
 }

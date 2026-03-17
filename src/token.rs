@@ -12,6 +12,7 @@ pub enum Token {
     Identificador(String),
     Tipo(String),
     Entero(i64),
+    Cadena(String),
 
     // Símbolos
     DosPuntos,
@@ -32,6 +33,9 @@ pub enum Token {
     ParentesisCierra,
     LlaveAbre,
     LlaveCierra,
+    CorcheteAbre,   // [
+    CorcheteCierra, // ]
+    Coma,           // ,
 
     Ilegal,
     FinDeArchivo,

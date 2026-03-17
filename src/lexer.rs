@@ -43,6 +43,10 @@ impl Lexer {
                     Token::Asignacion
                 }
             }
+            '"' => return self.leer_cadena(),
+            ',' => Token::Coma,             // <-- NUEVO
+            '[' => Token::CorcheteAbre,     // <-- NUEVO
+            ']' => Token::CorcheteCierra,   // <-- NUEVO
             'a'..='z' | 'A'..='Z' | '_' => return self.leer_identificador_o_palabra_clave(),
             '0'..='9' => return self.leer_numero(),
             _ => Token::Ilegal,
@@ -51,6 +55,24 @@ impl Lexer {
         self.position += 1;
         token
 
+    }
+
+    // Lee texto entre comillas
+    fn leer_cadena(&mut self) -> Token {
+        self.position += 1; // Saltamos la primera comilla '"'
+        let inicio = self.position;
+
+        while self.position < self.input.len() && self.input[self.position] != '"' {
+            self.position += 1;
+        }
+
+        let cadena: String = self.input[inicio..self.position].iter().collect();
+
+        if self.position < self.input.len() {
+            self.position += 1; // Saltamos la comilla final '"'
+        }
+
+        Token::Cadena(cadena)
     }
 
     fn saltar_espacios(&mut self) {

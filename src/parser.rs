@@ -192,33 +192,71 @@ impl Parser {
         })
     }
 
+    // Entiende [1, 2, "hola"]
+    fn parse_arreglo(&mut self) -> Option<Expresion> {
+        self.avanzar(); // Pasamos el '['
+        let mut elementos = Vec::new();
+
+        // Si el arreglo está vacío: []
+        if self.token_actual == Token::CorcheteCierra {
+            self.avanzar();
+            return Some(Expresion::Arreglo(elementos));
+        }
+
+        // Leemos el primer elemento
+        if let Some(expr) = self.parse_expresion() {
+            elementos.push(expr);
+        }
+
+        // Mientras haya comas, seguimos leyendo elementos
+        while self.token_actual == Token::Coma {
+            self.avanzar(); // Pasamos la ','
+            if let Some(expr) = self.parse_expresion() {
+                elementos.push(expr);
+            }
+        }
+
+        if self.token_actual != Token::CorcheteCierra { return None; }
+        self.avanzar(); // Pasamos el ']'
+
+        Some(Expresion::Arreglo(elementos))
+    }
+
     // Lee un valor, y si ve un operador matemático, lee el siguiente valor
+    // Lee valores, arreglos, accesos a índices y operaciones matemáticas
     fn parse_expresion(&mut self) -> Option<Expresion> {
-        // 1. Leemos el lado izquierdo (ej: 10, o 'vida', o 'true')
-        let izquierda = match &self.token_actual {
+        // 1. Leemos el lado izquierdo (puede ser un número, variable, o un arreglo nuevo)
+        let mut izquierda = match &self.token_actual {
             Token::Entero(n) => Expresion::Entero(*n),
             Token::Identificador(nom) => Expresion::Identificador(nom.clone()),
             Token::True => Expresion::Booleano(true),
             Token::False => Expresion::Booleano(false),
+            Token::Cadena(texto) => Expresion::Cadena(texto.clone()),
+            Token::CorcheteAbre => return self.parse_arreglo(), // <-- SI ES UN ARREGLO, LO CREAMOS Y SALIMOS
             _ => return None,
         };
         self.avanzar();
 
-        // 2. Miramos si el token actual ahora es un operador (+, -, ==, etc)
+        // <-- NUEVO: Verificamos si después de la variable hay un '[' (ej: horda[0])
+        while self.token_actual == Token::CorcheteAbre {
+            self.avanzar(); // Pasamos '['
+            let indice = self.parse_expresion()?;
+            if self.token_actual != Token::CorcheteCierra { return None; }
+            self.avanzar(); // Pasamos ']'
+
+            izquierda = Expresion::Indice {
+                estructura: Box::new(izquierda),
+                indice: Box::new(indice),
+            };
+        }
+
+        // 2. Miramos si hay un operador matemático (+, -, ==, etc)
         match self.token_actual {
             Token::Suma | Token::Resta | Token::Multiplicacion | Token::Division | Token::Igualdad | Token::MenorQue | Token::MayorQue => {
                 let operador = self.token_actual.clone();
                 self.avanzar(); // Pasamos el operador
 
-                // 3. Leemos el lado derecho
-                let derecha = match &self.token_actual {
-                    Token::Entero(n) => Expresion::Entero(*n),
-                    Token::Identificador(nom) => Expresion::Identificador(nom.clone()),
-                    Token::True => Expresion::Booleano(true),
-                    Token::False => Expresion::Booleano(false),
-                    _ => return None,
-                };
-                self.avanzar();
+                let derecha = self.parse_expresion()?; // <-- Usamos recursividad para el lado derecho
 
                 return Some(Expresion::Operacion {
                     izquierda: Box::new(izquierda),
@@ -226,7 +264,7 @@ impl Parser {
                     derecha: Box::new(derecha),
                 });
             }
-            _ => {} // Si no hay operador, solo devolvemos el valor izquierdo (ej: let x = 5;)
+            _ => {}
         }
 
         Some(izquierda)
