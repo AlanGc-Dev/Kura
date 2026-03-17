@@ -51,6 +51,7 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) {
             let valor_evaluado = evaluar_expresion(valor, entorno);
             match valor_evaluado {
                 ObjetoKura::Entero(n) => println!("{}", n),
+                ObjetoKura::Booleano(b) => println!("{}", b), // <-- ¡Esta es la línea que faltaba!
                 ObjetoKura::Nulo => println!("null (variable no encontrada)"),
             }
         }
@@ -65,6 +66,29 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) {
             } else {
                 // Control de errores al estilo Rust/C#
                 println!("Error de Ejecución: La variable '{}' no ha sido declarada con 'let'.", nombre);
+            }
+        }
+
+        // ... (tus otros match arms: Let, Print, Reasignacion) ...
+
+        Declaracion::If { condicion, consecuencia, alternativa } => {
+            let valor_condicion = evaluar_expresion(condicion, entorno);
+
+            // Verificamos si la condición es verdadera
+            let es_verdadero = match valor_condicion {
+                ObjetoKura::Booleano(b) => b,
+                ObjetoKura::Entero(n) => n != 0, // En Kura, cualquier número que no sea 0 es "true"
+                _ => false,
+            };
+
+            if es_verdadero {
+                for decl in consecuencia {
+                    evaluar_declaracion(decl, entorno);
+                }
+            } else if let Some(bloque_else) = alternativa {
+                for decl in bloque_else {
+                    evaluar_declaracion(decl, entorno);
+                }
             }
         }
     }

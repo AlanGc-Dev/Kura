@@ -73,6 +73,8 @@ impl Lexer {
             "print" => Token::Print,
             "true" => Token::True,   // <-- NUEVO
             "false" => Token::False, // <-- NUEVO
+            "if" => Token::If,       // <-- NUEVO
+            "else" => Token::Else,
             "int" | "float" | "str" | "bool" => Token::Tipo(palabra),
             _ => Token::Identificador(palabra),
         }

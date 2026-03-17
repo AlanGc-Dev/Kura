@@ -6,6 +6,8 @@ pub enum Token {
     Print,
     True,   // <-- NUEVO
     False,  // <-- NUEVO
+    If,    // <-- NUEVO
+    Else,
 
     Identificador(String),
     Tipo(String),

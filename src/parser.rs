@@ -50,6 +50,7 @@ impl Parser {
         match self.token_actual {
             Token::Let => self.parse_declaracion_let(),
             Token::Print => self.parse_print(),
+            Token::If => self.parse_if(), // <-- NUEVO
             Token::Identificador(_) => self.parse_reasignacion(), // <-- ¡NUEVO!
             _ => {
                 self.avanzar();
@@ -58,28 +59,60 @@ impl Parser {
         }
     }
 
+    fn parse_if(&mut self) -> Option<Declaracion> {
+        self.avanzar(); // Pasamos el 'if'
+
+        // Leemos la condición (ej: vida > 0)
+        let condicion = self.parse_expresion()?;
+
+        // Esperamos que abra el bloque '{'
+        if self.token_actual != Token::LlaveAbre { return None; }
+        self.avanzar();
+
+        // Leemos todo lo que hay dentro del if hasta encontrar '}'
+        let mut consecuencia = Vec::new();
+        while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
+            if let Some(decl) = self.parse_declaracion() {
+                consecuencia.push(decl);
+            }
+        }
+        self.avanzar(); // Pasamos el '}'
+
+        // Miramos si hay un 'else'
+        let mut alternativa = None;
+        if self.token_actual == Token::Else {
+            self.avanzar(); // Pasamos el 'else'
+            if self.token_actual == Token::LlaveAbre {
+                self.avanzar();
+                let mut bloque_else = Vec::new();
+                while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
+                    if let Some(decl) = self.parse_declaracion() {
+                        bloque_else.push(decl);
+                    }
+                }
+                self.avanzar();
+                alternativa = Some(bloque_else);
+            }
+        }
+
+        Some(Declaracion::If { condicion, consecuencia, alternativa })
+    }
+
+    // Entiende la sintaxis: variable = nuevo_valor;
     // Entiende la sintaxis: variable = nuevo_valor;
     fn parse_reasignacion(&mut self) -> Option<Declaracion> {
-        // 1. Obtenemos el nombre de la variable
         let nombre = match &self.token_actual {
             Token::Identificador(n) => n.clone(),
             _ => return None,
         };
         self.avanzar();
 
-        // 2. Esperamos el igual '='
         if self.token_actual != Token::Asignacion { return None; }
         self.avanzar();
 
-        // 3. Leemos el nuevo valor (número o el nombre de otra variable)
-        let valor = match &self.token_actual {
-            Token::Entero(n) => Expresion::Entero(*n),
-            Token::Identificador(nom) => Expresion::Identificador(nom.clone()),
-            _ => return None,
-        };
-        self.avanzar();
+        // Leemos la expresión matemática completa
+        let valor = self.parse_expresion()?;
 
-        // 4. Punto y coma opcional al final
         if self.token_actual == Token::PuntoYComa {
             self.avanzar();
         }
@@ -96,12 +129,8 @@ impl Parser {
         self.avanzar();
 
         // Leemos lo que está adentro (un número o una variable)
-        let valor = match &self.token_actual {
-            Token::Entero(n) => Expresion::Entero(*n),
-            Token::Identificador(nombre) => Expresion::Identificador(nombre.clone()),
-            _ => return None,
-        };
-        self.avanzar();
+        // Leemos lo que está adentro (puede ser una operación matemática también)
+        let valor = self.parse_expresion()?;
 
         // Esperamos ')'
         if self.token_actual != Token::ParentesisCierra { return None; }

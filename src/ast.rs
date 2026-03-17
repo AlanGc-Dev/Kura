@@ -22,6 +22,11 @@ pub enum Declaracion {
         nombre: String,
         valor: Expresion,
     },
+    If {                                      // <-- NUEVO BLOQUE
+        condicion: Expresion,
+        consecuencia: Vec<Declaracion>,
+        alternativa: Option<Vec<Declaracion>> // El else es opcional
+    },
 }
 
 // Las expresiones son cosas que producen un valor (ej: 5, "hola", x + 2)

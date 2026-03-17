@@ -15,13 +15,13 @@ fn main() {
         let danio: int = 15;
         
         vida = vida - danio;
-        print(vida); // Debería imprimir 85
         
-        let esta_vivo: bool = vida > 0;
-        print(esta_vivo); // Debería imprimir true
-        
-        let es_jefe: bool = vida == 1000;
-        print(es_jefe); // Debería imprimir false
+        if vida > 0 {
+            print(vida);
+            print(true);
+        } else {
+            print(false);
+        }
     ";
 
     println!("Iniciando Kura Engine...\n");
