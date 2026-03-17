@@ -1,7 +1,9 @@
+#![allow(dead_code)]
+
 use crate::token::Token;
 
 // Un programa completo en Kura es solo una lista de declaraciones
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Programa {
     pub declaraciones: Vec<Declaracion>,
 }
