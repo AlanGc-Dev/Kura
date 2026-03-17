@@ -31,6 +31,18 @@ pub enum Declaracion {
         condicion: Expresion,
         cuerpo: Vec<Declaracion>,
     },
+    Funcion {                   // <-- NUEVO: Para crear 'fn atacar() { ... }'
+        nombre: String,
+        parametros: Vec<String>,
+        cuerpo: Vec<Declaracion>,
+    },
+    Return {                    // <-- NUEVO: Para 'return 100;'
+        valor: Expresion,
+    },
+    LlamadaSuelta {             // <-- NUEVO: Para llamar una función sola: 'atacar(orco);'
+        nombre: String,
+        argumentos: Vec<Expresion>,
+    },
 }
 
 // Las expresiones son cosas que producen un valor (ej: 5, "hola", x + 2)
@@ -51,6 +63,10 @@ pub enum Expresion {
         izquierda: Box<Expresion>, // Box es necesario en Rust para estructuras recursivas
         operador: Token,
         derecha: Box<Expresion>,
+    },
+    Llamada {                   // <-- NUEVO
+        nombre: String,
+        argumentos: Vec<Expresion>,
     },
 
 }

@@ -25,7 +25,14 @@ impl Lexer {
             ':' => Token::DosPuntos,
             ';' => Token::PuntoYComa,
             '+' => Token::Suma,
-            '-' => Token::Resta,
+            '-' => {
+                if self.position + 1 < self.input.len() && self.input[self.position + 1] == '>' {
+                    self.position += 1; // Saltamos el '>'
+                    Token::Flecha
+                } else {
+                    Token::Resta
+                }
+            }
             '*' => Token::Multiplicacion,
             '/' => Token::Division,
             '<' => Token::MenorQue,
@@ -98,7 +105,9 @@ impl Lexer {
             "if" => Token::If,       // <-- NUEVO
             "else" => Token::Else,
             "while" => Token::While,
-            "int" | "float" | "str" | "bool" | "Arreglo" => Token::Tipo(palabra),
+            "fn" => Token::Fn,
+            "return" => Token::Return,
+            "int" | "float" | "str" | "bool" | "Arreglo" | "void" => Token::Tipo(palabra),
             _ => Token::Identificador(palabra),
         }
     }

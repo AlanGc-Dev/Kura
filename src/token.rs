@@ -9,6 +9,8 @@ pub enum Token {
     If,    // <-- NUEVO
     Else,
     While,
+    Fn,      // <-- NUEVO
+    Return,
 
     Identificador(String),
     Tipo(String),
@@ -28,6 +30,7 @@ pub enum Token {
     Igualdad,       // ==  <-- NUEVO
     MenorQue,       // <   <-- NUEVO
     MayorQue,       // >   <-- NUEVO
+    Flecha,         // ->
 
     // Agrupación
     ParentesisAbre,
