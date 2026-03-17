@@ -51,12 +51,36 @@ impl Parser {
             Token::Let => self.parse_declaracion_let(),
             Token::Print => self.parse_print(),
             Token::If => self.parse_if(), // <-- NUEVO
+            Token::While => self.parse_while(),
             Token::Identificador(_) => self.parse_reasignacion(), // <-- ¡NUEVO!
             _ => {
                 self.avanzar();
                 None
             }
         }
+    }
+
+    // Entiende la sintaxis: while condicion { cuerpo }
+    fn parse_while(&mut self) -> Option<Declaracion> {
+        self.avanzar(); // Pasamos el 'while'
+
+        // Leemos la condición (ej: vida > 0)
+        let condicion = self.parse_expresion()?;
+
+        // Esperamos que abra el bloque '{'
+        if self.token_actual != Token::LlaveAbre { return None; }
+        self.avanzar();
+
+        // Leemos todo el cuerpo del bucle
+        let mut cuerpo = Vec::new();
+        while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
+            if let Some(decl) = self.parse_declaracion() {
+                cuerpo.push(decl);
+            }
+        }
+        self.avanzar(); // Pasamos el '}'
+
+        Some(Declaracion::While { condicion, cuerpo })
     }
 
     fn parse_if(&mut self) -> Option<Declaracion> {

@@ -7,7 +7,7 @@ pub struct Programa {
 }
 
 // Las declaraciones son líneas de código que "hacen algo" pero no devuelven un valor (ej: let mut x = 5;)
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub enum Declaracion {
     Let {
         es_mut: bool,
@@ -27,6 +27,10 @@ pub enum Declaracion {
         consecuencia: Vec<Declaracion>,
         alternativa: Option<Vec<Declaracion>> // El else es opcional
     },
+    While {                 // <-- ¡NUEVO BLOQUE MÁGICO!
+        condicion: Expresion,
+        cuerpo: Vec<Declaracion>,
+    },
 }
 
 // Las expresiones son cosas que producen un valor (ej: 5, "hola", x + 2)
@@ -42,10 +46,11 @@ pub enum Expresion {
         estructura: Box<Expresion>,
         indice: Box<Expresion>
     },
+
     Operacion {     // <-- NUEVO (ej: 10 + 5)
         izquierda: Box<Expresion>, // Box es necesario en Rust para estructuras recursivas
         operador: Token,
         derecha: Box<Expresion>,
     },
-    
+
 }

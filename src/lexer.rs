@@ -97,7 +97,8 @@ impl Lexer {
             "false" => Token::False, // <-- NUEVO
             "if" => Token::If,       // <-- NUEVO
             "else" => Token::Else,
-            "int" | "float" | "str" | "bool" => Token::Tipo(palabra),
+            "while" => Token::While,
+            "int" | "float" | "str" | "bool" | "Arreglo" => Token::Tipo(palabra),
             _ => Token::Identificador(palabra),
         }
     }

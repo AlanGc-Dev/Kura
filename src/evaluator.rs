@@ -72,6 +72,31 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) {
                 ObjetoKura::Nulo => println!("null"),
             }
         }
+        // ... (tus otros match arms: If, Reasignacion, etc)
+
+        Declaracion::While { condicion, cuerpo } => {
+            // Un loop infinito en Rust que controlaremos con la condición de Kura
+            loop {
+                // 1. Evaluamos la condición actual
+                let valor_condicion = evaluar_expresion(condicion.clone(), entorno);
+
+                let es_verdadero = match valor_condicion {
+                    ObjetoKura::Booleano(b) => b,
+                    ObjetoKura::Entero(n) => n != 0,
+                    _ => false,
+                };
+
+                // 2. Si es falsa, rompemos el bucle
+                if !es_verdadero {
+                    break;
+                }
+
+                // 3. Si es verdadera, ejecutamos todo el cuerpo
+                for decl in cuerpo.clone() {
+                    evaluar_declaracion(decl, entorno);
+                }
+            }
+        }
         // <-- ¡NUEVO BLOQUE REASIGNACION! -->
         Declaracion::Reasignacion { nombre, valor } => {
             // Evaluamos el nuevo valor
@@ -122,7 +147,7 @@ fn evaluar_expresion(expresion: Expresion, entorno: &Entorno) -> ObjetoKura {
             }
             ObjetoKura::Arreglo(evaluados)
         }
-        
+
         Expresion::Identificador(nombre) => {
             entorno.obtener(&nombre).unwrap_or(ObjetoKura::Nulo)
         }

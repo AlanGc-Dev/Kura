@@ -11,15 +11,18 @@ use evaluator::{Entorno, evaluar_programa};
 fn main() {
     // Escribimos un pequeño programa en Kura
     let codigo_kura = "
-        let mut horda: Arreglo = [\"Goblin\", \"Orco\", \"Dragon\"];
-        let edades: Arreglo = [15, 45, 1000];
+        let mut vida: int = 30;
+        let danio: int = 10;
 
-        print(horda);
-        print(edades);
+        print(\"¡Comienza el combate!\");
 
-        let jefe: str = horda[2];
-        print(\"El jefe es:\");
-        print(jefe);
+        while vida > 0 {
+            print(\"Recibes danio... Vida actual:\");
+            print(vida);
+            vida = vida - danio;
+        }
+
+        print(\"¡Has muerto!\");
     ";
     println!("Iniciando Kura Engine...\n");
 

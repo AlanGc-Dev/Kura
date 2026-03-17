@@ -8,6 +8,7 @@ pub enum Token {
     False,  // <-- NUEVO
     If,    // <-- NUEVO
     Else,
+    While,
 
     Identificador(String),
     Tipo(String),
