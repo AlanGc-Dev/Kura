@@ -23,16 +23,26 @@ impl Lexer {
 
         let token = match char_actual {
             ':' => Token::DosPuntos,
-            '=' => Token::Asignacion,
             ';' => Token::PuntoYComa,
             '+' => Token::Suma,
             '-' => Token::Resta,
             '*' => Token::Multiplicacion,
             '/' => Token::Division,
+            '<' => Token::MenorQue,
+            '>' => Token::MayorQue,
             '(' => Token::ParentesisAbre,
             ')' => Token::ParentesisCierra,
             '{' => Token::LlaveAbre,
             '}' => Token::LlaveCierra,
+            '=' => {
+                // Miramos si el siguiente carácter también es '='
+                if self.position + 1 < self.input.len() && self.input[self.position + 1] == '=' {
+                    self.position += 1; // Saltamos el segundo '='
+                    Token::Igualdad
+                } else {
+                    Token::Asignacion
+                }
+            }
             'a'..='z' | 'A'..='Z' | '_' => return self.leer_identificador_o_palabra_clave(),
             '0'..='9' => return self.leer_numero(),
             _ => Token::Ilegal,
@@ -60,6 +70,9 @@ impl Lexer {
         match palabra.as_str() {
             "let" => Token::Let,
             "mut" => Token::Mut,
+            "print" => Token::Print,
+            "true" => Token::True,   // <-- NUEVO
+            "false" => Token::False, // <-- NUEVO
             "int" | "float" | "str" | "bool" => Token::Tipo(palabra),
             _ => Token::Identificador(palabra),
         }

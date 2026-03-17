@@ -1,24 +1,31 @@
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
+    // Palabras clave
     Let,
     Mut,
+    Print,
+    True,   // <-- NUEVO
+    False,  // <-- NUEVO
 
     Identificador(String),
     Tipo(String),
     Entero(i64),
 
-    PuntoYComa,
-
+    // Símbolos
     DosPuntos,
     Asignacion,
+    PuntoYComa,
 
+    // Matemáticas y Lógica
+    Suma,           // +
+    Resta,          // -
+    Multiplicacion, // *
+    Division,       // /
+    Igualdad,       // ==  <-- NUEVO
+    MenorQue,       // <   <-- NUEVO
+    MayorQue,       // >   <-- NUEVO
 
-
-    Suma,
-    Resta,
-    Multiplicacion,
-    Division,
-
+    // Agrupación
     ParentesisAbre,
     ParentesisCierra,
     LlaveAbre,
@@ -26,5 +33,4 @@ pub enum Token {
 
     Ilegal,
     FinDeArchivo,
-
 }
