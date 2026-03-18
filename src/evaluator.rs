@@ -53,27 +53,8 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
         }
         Declaracion::Print { valor } => {
             let valor_evaluado = evaluar_expresion(valor, entorno);
-            match valor_evaluado {
-                ObjetoKura::Entero(n) => println!("{}", n),
-                ObjetoKura::Booleano(b) => println!("{}", b),
-                ObjetoKura::Cadena(texto) => println!("{}", texto),
-                ObjetoKura::Arreglo(arr) => {
-                    print!("[");
-                    for (i, el) in arr.iter().enumerate() {
-                        match el {
-                            ObjetoKura::Entero(n) => print!("{}", n),
-                            ObjetoKura::Booleano(b) => print!("{}", b),
-                            ObjetoKura::Cadena(t) => print!("\"{}\"", t),
-                            _ => print!("null"),
-                        }
-                        if i < arr.len() - 1 { print!(", "); }
-                    }
-                    println!("]");
-                }
-                ObjetoKura::Nulo => println!("null"),
-                ObjetoKura::Funcion { .. } => println!("[Funcion Interna]"),
-                ObjetoKura::Retorno(_) => {}
-            }
+            imprimir_objeto(&valor_evaluado);
+            println!(); // Salto de línea al final
             ObjetoKura::Nulo
         }
         Declaracion::Reasignacion { nombre, valor } => {
@@ -167,8 +148,10 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
         Expresion::Operacion { izquierda, operador, derecha } => {
             let izq_val = evaluar_expresion(*izquierda, entorno);
             let der_val = evaluar_expresion(*derecha, entorno);
-            if let (ObjetoKura::Entero(i), ObjetoKura::Entero(d)) = (izq_val, der_val) {
-                match operador {
+
+            // Si ambos son números
+            if let (ObjetoKura::Entero(i), ObjetoKura::Entero(d)) = (&izq_val, &der_val) {
+                return match operador {
                     Token::Suma => ObjetoKura::Entero(i + d),
                     Token::Resta => ObjetoKura::Entero(i - d),
                     Token::Multiplicacion => ObjetoKura::Entero(i * d),
@@ -177,18 +160,98 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                     Token::MenorQue => ObjetoKura::Booleano(i < d),
                     Token::MayorQue => ObjetoKura::Booleano(i > d),
                     _ => ObjetoKura::Nulo,
-                }
-            } else {
-                ObjetoKura::Nulo
+                };
             }
+
+            // Si ambos son textos (Strings)
+            if let (ObjetoKura::Cadena(i), ObjetoKura::Cadena(d)) = (&izq_val, &der_val) {
+                if operador == Token::Igualdad { return ObjetoKura::Booleano(i == d); }
+                if operador == Token::Suma { return ObjetoKura::Cadena(format!("{}{}", i, d)); } // ¡Concatena textos!
+            }
+
+            ObjetoKura::Nulo
         }
         // --- GOLPE FINAL: EJECUTAR LA LLAMADA A FUNCIÓN ---
         Expresion::Llamada { nombre, argumentos } => {
+
+            // 1. FUNCIONES NATIVAS (Pre-instaladas en Kura)
+            if nombre == "len" && argumentos.len() == 1 {
+                let arg_eval = evaluar_expresion(argumentos[0].clone(), entorno);
+                match arg_eval {
+                    ObjetoKura::Cadena(s) => return ObjetoKura::Entero(s.len() as i64),
+                    ObjetoKura::Arreglo(arr) => return ObjetoKura::Entero(arr.len() as i64),
+                    _ => {
+                        println!("Error: 'len' solo acepta cadenas o arreglos.");
+                        return ObjetoKura::Nulo;
+                    }
+                }
+            }
+            
+            if nombre == "es_letra" && argumentos.len() == 1 {
+                if let ObjetoKura::Cadena(s) = evaluar_expresion(argumentos[0].clone(), entorno) {
+                    if let Some(c) = s.chars().next() {
+                        return ObjetoKura::Booleano(c.is_alphabetic() || c == '_');
+                    }
+                }
+                return ObjetoKura::Booleano(false);
+            }
+
+            if nombre == "es_numero" && argumentos.len() == 1 {
+                if let ObjetoKura::Cadena(s) = evaluar_expresion(argumentos[0].clone(), entorno) {
+                    if let Some(c) = s.chars().next() {
+                        return ObjetoKura::Booleano(c.is_numeric());
+                    }
+                }
+                return ObjetoKura::Booleano(false);
+            }
+
+            if nombre == "char_at" && argumentos.len() == 2 {
+                let texto_eval = evaluar_expresion(argumentos[0].clone(), entorno);
+                let indice_eval = evaluar_expresion(argumentos[1].clone(), entorno);
+
+                if let (ObjetoKura::Cadena(s), ObjetoKura::Entero(i)) = (texto_eval, indice_eval) {
+                    if i >= 0 && (i as usize) < s.len() {
+                        let c = s.chars().nth(i as usize).unwrap().to_string();
+                        return ObjetoKura::Cadena(c);
+                    } else {
+                        return ObjetoKura::Cadena("".to_string()); // Índice fuera de rango
+                    }
+                } else {
+                    println!("Error: 'char_at' espera (cadena, entero).");
+                    return ObjetoKura::Nulo;
+                }
+            }
+            if nombre == "push" && argumentos.len() == 2 {
+                let arr_eval = evaluar_expresion(argumentos[0].clone(), entorno);
+                let item_eval = evaluar_expresion(argumentos[1].clone(), entorno);
+                if let ObjetoKura::Arreglo(mut arr) = arr_eval {
+                    arr.push(item_eval);
+                    return ObjetoKura::Arreglo(arr); // Devuelve el nuevo arreglo con el elemento adentro
+                } else {
+                    println!("Error: 'push' espera (arreglo, elemento).");
+                    return ObjetoKura::Nulo;
+                }
+            }
+
+            if nombre == "leer_archivo" && argumentos.len() == 1 {
+                let ruta_eval = evaluar_expresion(argumentos[0].clone(), entorno);
+                if let ObjetoKura::Cadena(ruta) = ruta_eval {
+                    match std::fs::read_to_string(&ruta) {
+                        Ok(contenido) => return ObjetoKura::Cadena(contenido),
+                        Err(_) => {
+                            println!("Error: No se pudo leer el archivo '{}'", ruta);
+                            return ObjetoKura::Nulo;
+                        }
+                    }
+                }
+            }
+
+            // 2. FUNCIONES DEL USUARIO (Las que tú creas con 'fn' en Kura)
             let funcion = entorno.obtener(&nombre);
             if let Some(ObjetoKura::Funcion { parametros, cuerpo }) = funcion {
                 let mut entorno_local = entorno.extend(); // Creamos la memoria local
 
-                // Le pasamos los argumentos a los parámetros (ej: vida = 100)
+                // Le pasamos los argumentos a los parámetros
                 for (i, arg_expr) in argumentos.into_iter().enumerate() {
                     let arg_evaluado = evaluar_expresion(arg_expr, entorno);
                     if i < parametros.len() {
@@ -196,16 +259,34 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                     }
                 }
 
-                // Ejecutamos línea por línea el cuerpo de la función
+                // Ejecutamos línea por línea
                 for decl in cuerpo {
                     let res = evaluar_declaracion(decl, &mut entorno_local);
-                    // Si encontramos un return, detenemos la función y devolvemos el valor
                     if let ObjetoKura::Retorno(valor) = res {
                         return *valor;
                     }
                 }
             }
-            ObjetoKura::Nulo // Si no hay return, devuelve nulo (Void)
+            ObjetoKura::Nulo
         }
+    }
+}
+// Nueva función para imprimir objetos anidados infinitamente
+pub fn imprimir_objeto(obj: &ObjetoKura) {
+    match obj {
+        ObjetoKura::Entero(n) => print!("{}", n),
+        ObjetoKura::Booleano(b) => print!("{}", b),
+        ObjetoKura::Cadena(t) => print!("\"{}\"", t),
+        ObjetoKura::Arreglo(arr) => {
+            print!("[");
+            for (i, el) in arr.iter().enumerate() {
+                imprimir_objeto(el);
+                if i < arr.len() - 1 { print!(", "); }
+            }
+            print!("]");
+        }
+        ObjetoKura::Nulo => print!("null"),
+        ObjetoKura::Funcion { .. } => print!("[Funcion]"),
+        ObjetoKura::Retorno(val) => imprimir_objeto(val),
     }
 }

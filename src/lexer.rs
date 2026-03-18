@@ -65,15 +65,28 @@ impl Lexer {
     }
 
     // Lee texto entre comillas
+    // Lee texto entre comillas soportando secuencias de escape como \n y \"
     fn leer_cadena(&mut self) -> Token {
         self.position += 1; // Saltamos la primera comilla '"'
-        let inicio = self.position;
+        let mut cadena = String::new();
 
         while self.position < self.input.len() && self.input[self.position] != '"' {
+            // Si detectamos una barra invertida '\', miramos la siguiente letra
+            if self.input[self.position] == '\\' && self.position + 1 < self.input.len() {
+                self.position += 1; // Saltamos la barra '\'
+                match self.input[self.position] {
+                    'n' => cadena.push('\n'), // Salto de línea
+                    'r' => cadena.push('\r'), // Retorno de carro
+                    't' => cadena.push('\t'), // Tabulación
+                    '"' => cadena.push('"'),  // Comilla escapada
+                    '\\' => cadena.push('\\'), // Barra invertida
+                    _ => cadena.push(self.input[self.position]),
+                }
+            } else {
+                cadena.push(self.input[self.position]);
+            }
             self.position += 1;
         }
-
-        let cadena: String = self.input[inicio..self.position].iter().collect();
 
         if self.position < self.input.len() {
             self.position += 1; // Saltamos la comilla final '"'
@@ -82,9 +95,26 @@ impl Lexer {
         Token::Cadena(cadena)
     }
 
+    // Salta espacios en blanco y también IGNORA los comentarios //
     fn saltar_espacios(&mut self) {
-        while self.position < self.input.len() && self.input[self.position].is_whitespace() {
-            self.position += 1;
+        while self.position < self.input.len() {
+            let c = self.input[self.position];
+
+            // 1. Si es un espacio o salto de línea, lo saltamos
+            if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+                self.position += 1;
+            }
+            // 2. Si es una barra '/', miramos si la siguiente también es '/'
+            else if c == '/' && self.position + 1 < self.input.len() && self.input[self.position + 1] == '/' {
+                // ¡Es un comentario! Avanzamos hasta encontrar el final de la línea (\n)
+                while self.position < self.input.len() && self.input[self.position] != '\n' {
+                    self.position += 1;
+                }
+            }
+            // 3. Si es código real, nos detenemos y dejamos que next_token haga su trabajo
+            else {
+                break;
+            }
         }
     }
 
