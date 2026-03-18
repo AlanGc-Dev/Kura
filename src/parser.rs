@@ -51,6 +51,7 @@ impl Parser {
             Token::If => self.parse_if(),
             Token::While => self.parse_while(),
             Token::Fn => self.parse_funcion(),
+            Token::Break => self.parse_break(),
             Token::Import => self.parse_declaracion_import(),// <-- LEEMOS FUNCIONES
             Token::Return => self.parse_return(),    // <-- LEEMOS RETORNOS
             Token::Identificador(_) => {
@@ -69,6 +70,12 @@ impl Parser {
                 None
             }
         }
+    }
+
+    fn parse_break(&mut self) -> Option<Declaracion> {
+        self.avanzar(); // pasamos 'break'
+        if self.token_actual == Token::PuntoYComa { self.avanzar(); }
+        Some(Declaracion::Break)
     }
 
     fn parse_declaracion_import(&mut self) -> Option<Declaracion> {
@@ -141,18 +148,26 @@ impl Parser {
         self.avanzar();
         if self.token_actual != Token::DosPuntos { return None; }
         self.avanzar();
-        let tipo = match &self.token_actual {
-            Token::Tipo(t) => t.clone(),
-            _ => return None,
-        };
+        let mut tipo = "inferido".to_string();
+        if self.token_actual == Token::DosPuntos {
+            self.avanzar();
+            tipo = match &self.token_actual {
+                Token::Tipo(t) => t.clone(),
+                Token::Identificador(t) => t.clone(), // Por si usan un tipo no registrado
+                _ => return None,
+            };
+            self.avanzar();
+        }
         self.avanzar();
         if self.token_actual != Token::Asignacion { return None; }
         self.avanzar();
+
 
         let valor = self.parse_expresion()?;
 
         if self.token_actual == Token::PuntoYComa { self.avanzar(); }
         Some(Declaracion::Let { es_mut, nombre, tipo, valor })
+
     }
 
     fn parse_print(&mut self) -> Option<Declaracion> {
@@ -317,6 +332,7 @@ impl Parser {
             Token::Identificador(nom) => Expresion::Identificador(nom.clone()),
             Token::True => Expresion::Booleano(true),
             Token::False => Expresion::Booleano(false),
+            Token::LlaveAbre => return self.parse_diccionario(),
             Token::Cadena(texto) => Expresion::Cadena(texto.clone()),
             Token::CorcheteAbre => return self.parse_arreglo(),
             _ => return None,
@@ -352,7 +368,9 @@ impl Parser {
         }
 
         match self.token_actual {
-            Token::Suma | Token::Resta | Token::Multiplicacion | Token::Division | Token::Igualdad | Token::MenorQue | Token::MayorQue => {
+            Token::Suma | Token::Resta | Token::Multiplicacion | Token::Division |
+            Token::Igualdad | Token::MenorQue | Token::MayorQue |
+            Token::And | Token::Or => {
                 let operador = self.token_actual.clone();
                 self.avanzar();
                 let derecha = self.parse_expresion()?;
@@ -362,9 +380,38 @@ impl Parser {
                     derecha: Box::new(derecha),
                 });
             }
+
             _ => {}
         }
 
         Some(izquierda)
+    }
+    fn parse_diccionario(&mut self) -> Option<Expresion> {
+        self.avanzar(); // pasamos '{'
+        let mut pares = Vec::new();
+
+        while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
+            // Leer clave (permitimos cadenas "nombre" o identificadores directos nombre)
+            let clave = match &self.token_actual {
+                Token::Cadena(c) => c.clone(),
+                Token::Identificador(i) => i.clone(),
+                _ => return None,
+            };
+            self.avanzar();
+
+            if self.token_actual != Token::DosPuntos { return None; }
+            self.avanzar(); // pasamos ':'
+
+            let valor = self.parse_expresion()?;
+            pares.push((clave, valor));
+
+            if self.token_actual == Token::Coma {
+                self.avanzar(); // saltar coma opcional
+            }
+        }
+
+        if self.token_actual != Token::LlaveCierra { return None; }
+        self.avanzar(); // pasamos '}'
+        Some(Expresion::Diccionario(pares))
     }
 }

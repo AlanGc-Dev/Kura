@@ -11,6 +11,8 @@ pub enum ObjetoKura {
     Funcion { parametros: Vec<String>, cuerpo: Vec<Declaracion> }, // <-- GUARDAMOS LA FUNCIÓN EN MEMORIA
     Retorno(Box<ObjetoKura>), // <-- PARA ATRAPAR EL RETURN
     Nulo,
+    Diccionario(HashMap<String, ObjetoKura>), // <-- NUEVO
+    Break,
 }
 
 #[derive(Clone)]
@@ -66,6 +68,7 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
             }
             ObjetoKura::Nulo
         }
+        Declaracion::Break => ObjetoKura::Break,
         Declaracion::If { condicion, consecuencia, alternativa } => {
             let valor_condicion = evaluar_expresion(condicion, entorno);
             let es_verdadero = match valor_condicion {
@@ -77,12 +80,13 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
             if es_verdadero {
                 for decl in consecuencia {
                     let res = evaluar_declaracion(decl, entorno);
-                    if let ObjetoKura::Retorno(_) = res { return res; } // Burbujear el return
+                    // Atrapamos Return O Break y lo burbujeamos
+                    if matches!(res, ObjetoKura::Retorno(_) | ObjetoKura::Break) { return res; }
                 }
             } else if let Some(bloque_else) = alternativa {
                 for decl in bloque_else {
                     let res = evaluar_declaracion(decl, entorno);
-                    if let ObjetoKura::Retorno(_) = res { return res; }
+                    if matches!(res, ObjetoKura::Retorno(_) | ObjetoKura::Break) { return res; }
                 }
             }
             ObjetoKura::Nulo
@@ -97,13 +101,20 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
                 };
                 if !es_verdadero { break; }
 
+                let mut romper_ciclo = false;
                 for decl in cuerpo.clone() {
                     let res = evaluar_declaracion(decl, entorno);
-                    if let ObjetoKura::Retorno(_) = res { return res; }
+                    if matches!(res, ObjetoKura::Retorno(_)) { return res; }
+                    if matches!(res, ObjetoKura::Break) {
+                        romper_ciclo = true;
+                        break; // Rompe el for
+                    }
                 }
+                if romper_ciclo { break; } // Rompe el loop principal de Rust
             }
             ObjetoKura::Nulo
         }
+
         // --- GOLPE FINAL: LÓGICA DE FUNCIONES ---
         Declaracion::Funcion { nombre, parametros, cuerpo } => {
             let funcion = ObjetoKura::Funcion { parametros, cuerpo };
@@ -168,10 +179,16 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
         Expresion::Indice { estructura, indice } => {
             let estructura_evaluada = evaluar_expresion(*estructura, entorno);
             let indice_evaluado = evaluar_expresion(*indice, entorno);
-            if let (ObjetoKura::Arreglo(arr), ObjetoKura::Entero(i)) = (estructura_evaluada, indice_evaluado) {
-                if i >= 0 && (i as usize) < arr.len() {
-                    return arr[i as usize].clone();
+
+            // Si es un Arreglo...
+            if let (ObjetoKura::Arreglo(arr), ObjetoKura::Entero(i)) = (&estructura_evaluada, &indice_evaluado) {
+                if *i >= 0 && (*i as usize) < arr.len() {
+                    return arr[*i as usize].clone();
                 }
+            }
+            // ¡NUEVO!: Si es un Diccionario...
+            if let (ObjetoKura::Diccionario(dic), ObjetoKura::Cadena(clave)) = (&estructura_evaluada, &indice_evaluado) {
+                return dic.get(clave).cloned().unwrap_or(ObjetoKura::Nulo);
             }
             ObjetoKura::Nulo
         }
@@ -179,6 +196,17 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
             let izq_val = evaluar_expresion(*izquierda, entorno);
             let der_val = evaluar_expresion(*derecha, entorno);
 
+            // ¡NUEVO!: Operadores lógicos
+            if operador == Token::And {
+                if let (ObjetoKura::Booleano(b1), ObjetoKura::Booleano(b2)) = (&izq_val, &der_val) {
+                    return ObjetoKura::Booleano(*b1 && *b2);
+                }
+            }
+            if operador == Token::Or {
+                if let (ObjetoKura::Booleano(b1), ObjetoKura::Booleano(b2)) = (&izq_val, &der_val) {
+                    return ObjetoKura::Booleano(*b1 || *b2);
+                }
+            }
             // Si ambos son números
             if let (ObjetoKura::Entero(i), ObjetoKura::Entero(d)) = (&izq_val, &der_val) {
                 return match operador {
@@ -200,6 +228,14 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
             }
 
             ObjetoKura::Nulo
+        }
+        Expresion::Diccionario(pares) => {
+            let mut mapa = HashMap::new();
+            for (clave, valor_expr) in pares {
+                let valor_evaluado = evaluar_expresion(valor_expr, entorno);
+                mapa.insert(clave, valor_evaluado);
+            }
+            ObjetoKura::Diccionario(mapa)
         }
         // --- GOLPE FINAL: EJECUTAR LA LLAMADA A FUNCIÓN ---
         Expresion::Llamada { nombre, argumentos } => {
@@ -282,7 +318,7 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                 let indice_eval = evaluar_expresion(argumentos[1].clone(), entorno);
                 let valor_eval = evaluar_expresion(argumentos[2].clone(), entorno);
 
-                if let (ObjetoKura::Arreglo(mut arr), ObjetoKura::Entero(i)) = (arr_eval, indice_eval) {
+                if let (ObjetoKura::Arreglo(mut arr), ObjetoKura::Entero(i)) = (arr_eval.clone(), indice_eval.clone()) {
                     // Verificamos que el índice exista en el arreglo
                     if i >= 0 && (i as usize) < arr.len() {
                         arr[i as usize] = valor_eval; // ¡Sobrescribimos el valor!
@@ -291,6 +327,9 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                         println!("Error Kura: Indice {} fuera de limites en 'reemplazar'", i);
                         return ObjetoKura::Nulo;
                     }
+                }else if let (ObjetoKura::Diccionario(mut dic), ObjetoKura::Cadena(clave)) = (arr_eval, indice_eval) {
+                    dic.insert(clave, valor_eval);
+                    return ObjetoKura::Diccionario(dic);
                 } else {
                     println!("Error Kura: 'reemplazar' espera (Arreglo, Entero, Valor)");
                     return ObjetoKura::Nulo;
@@ -364,5 +403,18 @@ pub fn imprimir_objeto(obj: &ObjetoKura) {
         ObjetoKura::Nulo => print!("null"),
         ObjetoKura::Funcion { .. } => print!("[Funcion]"),
         ObjetoKura::Retorno(val) => imprimir_objeto(val),
+        ObjetoKura::Break => print!("break"),
+        ObjetoKura::Diccionario(dic) => {
+            print!("{{");
+            let mut count = 0;
+            let len = dic.len();
+            for (clave, valor) in dic {
+                print!("\"{}\": ", clave);
+                imprimir_objeto(valor);
+                count += 1;
+                if count < len { print!(", "); }
+            }
+            print!("}}");
+        }
     }
 }

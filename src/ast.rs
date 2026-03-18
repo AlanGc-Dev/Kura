@@ -11,6 +11,7 @@ pub struct Programa {
 // Las declaraciones son líneas de código que "hacen algo" pero no devuelven un valor (ej: let mut x = 5;)
 #[derive(Debug,Clone)]
 pub enum Declaracion {
+    Break,
     Let {
         es_mut: bool,
         nombre: String,
@@ -74,5 +75,6 @@ pub enum Expresion {
         nombre: String,
         argumentos: Vec<Expresion>,
     },
+    Diccionario(Vec<(String, Expresion)>),
 
 }

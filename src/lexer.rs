@@ -50,6 +50,22 @@ impl Lexer {
                     Token::Asignacion
                 }
             }
+            '&' => {
+                if self.position + 1 < self.input.len() && self.input[self.position + 1] == '&' {
+                    self.position += 1;
+                    Token::And
+                } else {
+                    Token::Ilegal
+                }
+            }
+            '|' => {
+                if self.position + 1 < self.input.len() && self.input[self.position + 1] == '|' {
+                    self.position += 1;
+                    Token::Or
+                } else {
+                    Token::Ilegal
+                }
+            }
             '"' => return self.leer_cadena(),
             ',' => Token::Coma,             // <-- NUEVO
             '[' => Token::CorcheteAbre,     // <-- NUEVO
@@ -139,6 +155,7 @@ impl Lexer {
             "return" => Token::Return,
             "import" => Token::Import, // <-- NUEVO: Reconoce "import"
             "from" => Token::From,
+            "break" => Token::Break,
             "int" | "float" | "str" | "bool" | "Arreglo" | "void" => Token::Tipo(palabra),
             _ => Token::Identificador(palabra),
         }

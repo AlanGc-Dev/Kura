@@ -13,6 +13,9 @@ pub enum Token {
     Return,
     Import,
     From,
+    Break,
+    And,    // && <-- NUEVO
+    Or,
 
     Identificador(String),
     Tipo(String),
