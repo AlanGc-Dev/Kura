@@ -137,6 +137,8 @@ impl Lexer {
             "while" => Token::While,
             "fn" => Token::Fn,
             "return" => Token::Return,
+            "import" => Token::Import, // <-- NUEVO: Reconoce "import"
+            "from" => Token::From,
             "int" | "float" | "str" | "bool" | "Arreglo" | "void" => Token::Tipo(palabra),
             _ => Token::Identificador(palabra),
         }

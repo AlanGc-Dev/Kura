@@ -25,6 +25,15 @@ impl Parser {
         self.token_siguiente = self.lexer.next_token();
     }
 
+    fn esperar_token(&mut self, token_esperado: Token) -> bool {
+        if self.token_actual == token_esperado {
+            self.avanzar();
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn parse_programa(&mut self) -> Programa {
         let mut declaraciones = Vec::new();
         while self.token_actual != Token::FinDeArchivo {
@@ -41,7 +50,8 @@ impl Parser {
             Token::Print => self.parse_print(),
             Token::If => self.parse_if(),
             Token::While => self.parse_while(),
-            Token::Fn => self.parse_funcion(),       // <-- LEEMOS FUNCIONES
+            Token::Fn => self.parse_funcion(),
+            Token::Import => self.parse_declaracion_import(),// <-- LEEMOS FUNCIONES
             Token::Return => self.parse_return(),    // <-- LEEMOS RETORNOS
             Token::Identificador(_) => {
                 // Miramos el siguiente token para saber si es reasignacion o llamada
@@ -61,6 +71,62 @@ impl Parser {
         }
     }
 
+    fn parse_declaracion_import(&mut self) -> Option<Declaracion> {
+        self.avanzar(); // Saltamos la palabra 'import'
+
+        // 1. Esperamos abrir llaves '{'
+        if !self.esperar_token(Token::LlaveAbre) {
+            println!("Error: Faltaba '{{' despues de import");
+            return None;
+        }
+
+        let mut elementos = Vec::new();
+
+        // 2. Leemos los nombres de lo que vamos a importar hasta encontrar '}'
+        while self.token_actual != Token::LlaveCierra && self.token_actual != Token::Ilegal {
+            match &self.token_actual {
+                Token::Identificador(nombre) => {
+                    elementos.push(nombre.clone());
+                    self.avanzar();
+                },
+                Token::Coma => {
+                    self.avanzar(); // Si hay una coma (,), la ignoramos y seguimos
+                },
+                _ => {
+                    println!("Error en import: Se esperaba el nombre de una funcion o variable.");
+                    return None;
+                }
+            }
+        }
+
+        // 3. Esperamos cerrar llaves '}'
+        if !self.esperar_token(Token::LlaveCierra) { return None; }
+
+        // 4. Esperamos la palabra 'from'
+        if !self.esperar_token(Token::From) {
+            println!("Error: Faltaba 'from' en el import");
+            return None;
+        }
+
+        // 5. Esperamos la ruta del archivo ("archivo.kr")
+        let archivo = match &self.token_actual {
+            Token::Cadena(ruta) => {
+                let r = ruta.clone();
+                self.avanzar();
+                r
+            },
+            _ => {
+                println!("Error en import: Faltan las comillas en la ruta del archivo.");
+                return None;
+            }
+        };
+
+        // 6. Esperamos el punto y coma ';'
+        if !self.esperar_token(Token::PuntoYComa) { return None; }
+
+        // ¡Si todo salió bien, devolvemos el Nodo creado!
+        Some(Declaracion::Importar { elementos, archivo })
+    }
     fn parse_declaracion_let(&mut self) -> Option<Declaracion> {
         self.avanzar();
         let mut es_mut = false;

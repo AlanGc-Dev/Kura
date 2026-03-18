@@ -118,6 +118,36 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
             evaluar_expresion(Expresion::Llamada { nombre, argumentos }, entorno);
             ObjetoKura::Nulo
         }
+        Declaracion::Importar { elementos, archivo } => {
+            // 1. Intentamos leer el archivo que nos pidieron
+            let contenido = match std::fs::read_to_string(&archivo) {
+                Ok(c) => c,
+                Err(_) => {
+                    println!("Error Kura: No se pudo abrir el modulo '{}'", archivo);
+                    return ObjetoKura::Nulo;
+                }
+            };
+
+            // 2. Creamos un mini-compilador para leer ese archivo
+            let lexer = crate::lexer::Lexer::new(&contenido);
+            let mut parser = crate::parser::Parser::new(lexer);
+            let programa_modulo = parser.parse_programa();
+
+            // 3. Creamos una "burbuja" de memoria temporal y ejecutamos el modulo ahi
+            let mut entorno_modulo = Entorno::new();
+            evaluar_programa(programa_modulo, &mut entorno_modulo);
+
+            // 4. Extraemos SOLO lo que el usuario pidio y lo pasamos al entorno principal
+            for nombre in elementos {
+                if let Some(valor) = entorno_modulo.obtener(&nombre) {
+                    entorno.guardar(nombre, valor);
+                } else {
+                    println!("Error Kura: '{}' no fue encontrado dentro de '{}'", nombre, archivo);
+                }
+            }
+
+            ObjetoKura::Nulo
+        },
     }
 }
 
@@ -178,7 +208,8 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
             if nombre == "len" && argumentos.len() == 1 {
                 let arg_eval = evaluar_expresion(argumentos[0].clone(), entorno);
                 match arg_eval {
-                    ObjetoKura::Cadena(s) => return ObjetoKura::Entero(s.len() as i64),
+                    // ¡NUEVO!: chars().count() cuenta letras reales, no bytes.
+                    ObjetoKura::Cadena(s) => return ObjetoKura::Entero(s.chars().count() as i64),
                     ObjetoKura::Arreglo(arr) => return ObjetoKura::Entero(arr.len() as i64),
                     _ => {
                         println!("Error: 'len' solo acepta cadenas o arreglos.");
@@ -186,7 +217,29 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                     }
                 }
             }
-            
+
+            // NUEVA FUNCIÓN: Convierte "50" (Texto) a 50 (Número)
+            if nombre == "a_numero" && argumentos.len() == 1 {
+                let arg_eval = evaluar_expresion(argumentos[0].clone(), entorno);
+                if let ObjetoKura::Cadena(s) = arg_eval {
+                    if let Ok(num) = s.parse::<i64>() {
+                        return ObjetoKura::Entero(num);
+                    }
+                }
+                return ObjetoKura::Entero(0); // Si falla, devuelve 0
+            }
+
+            // NUEVA FUNCIÓN: Convierte 50 (Número) a "50" (Texto)
+            if nombre == "a_texto" && argumentos.len() == 1 {
+                let arg_eval = evaluar_expresion(argumentos[0].clone(), entorno);
+                match arg_eval {
+                    ObjetoKura::Entero(n) => return ObjetoKura::Cadena(n.to_string()),
+                    ObjetoKura::Booleano(b) => return ObjetoKura::Cadena(b.to_string()),
+                    ObjetoKura::Cadena(c) => return ObjetoKura::Cadena(c),
+                    _ => return ObjetoKura::Cadena("".to_string()),
+                }
+            }
+
             if nombre == "es_letra" && argumentos.len() == 1 {
                 if let ObjetoKura::Cadena(s) = evaluar_expresion(argumentos[0].clone(), entorno) {
                     if let Some(c) = s.chars().next() {
@@ -210,17 +263,40 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                 let indice_eval = evaluar_expresion(argumentos[1].clone(), entorno);
 
                 if let (ObjetoKura::Cadena(s), ObjetoKura::Entero(i)) = (texto_eval, indice_eval) {
-                    if i >= 0 && (i as usize) < s.len() {
-                        let c = s.chars().nth(i as usize).unwrap().to_string();
-                        return ObjetoKura::Cadena(c);
-                    } else {
-                        return ObjetoKura::Cadena("".to_string()); // Índice fuera de rango
+                    // ¡NUEVO!: Validamos con seguridad sin usar unwrap() que pueda causar panic
+                    if i >= 0 && (i as usize) < s.chars().count() {
+                        if let Some(c) = s.chars().nth(i as usize) {
+                            return ObjetoKura::Cadena(c.to_string());
+                        }
                     }
+                    return ObjetoKura::Cadena("".to_string()); // Índice fuera de rango seguro
                 } else {
                     println!("Error: 'char_at' espera (cadena, entero).");
                     return ObjetoKura::Nulo;
                 }
             }
+
+            // NUEVA FUNCIÓN: Modifica un elemento específico de un arreglo
+            if nombre == "reemplazar" && argumentos.len() == 3 {
+                let arr_eval = evaluar_expresion(argumentos[0].clone(), entorno);
+                let indice_eval = evaluar_expresion(argumentos[1].clone(), entorno);
+                let valor_eval = evaluar_expresion(argumentos[2].clone(), entorno);
+
+                if let (ObjetoKura::Arreglo(mut arr), ObjetoKura::Entero(i)) = (arr_eval, indice_eval) {
+                    // Verificamos que el índice exista en el arreglo
+                    if i >= 0 && (i as usize) < arr.len() {
+                        arr[i as usize] = valor_eval; // ¡Sobrescribimos el valor!
+                        return ObjetoKura::Arreglo(arr); // Devolvemos el arreglo actualizado
+                    } else {
+                        println!("Error Kura: Indice {} fuera de limites en 'reemplazar'", i);
+                        return ObjetoKura::Nulo;
+                    }
+                } else {
+                    println!("Error Kura: 'reemplazar' espera (Arreglo, Entero, Valor)");
+                    return ObjetoKura::Nulo;
+                }
+            }
+
             if nombre == "push" && argumentos.len() == 2 {
                 let arr_eval = evaluar_expresion(argumentos[0].clone(), entorno);
                 let item_eval = evaluar_expresion(argumentos[1].clone(), entorno);

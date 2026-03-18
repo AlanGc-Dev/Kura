@@ -11,6 +11,8 @@ pub enum Token {
     While,
     Fn,      // <-- NUEVO
     Return,
+    Import,
+    From,
 
     Identificador(String),
     Tipo(String),

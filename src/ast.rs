@@ -45,6 +45,10 @@ pub enum Declaracion {
         nombre: String,
         argumentos: Vec<Expresion>,
     },
+    Importar {
+        elementos: Vec<String>, // Guarda ["funcion1", "variable2"]
+        archivo: String,        // Guarda "archivo.kr"
+    },
 }
 
 // Las expresiones son cosas que producen un valor (ej: 5, "hola", x + 2)
