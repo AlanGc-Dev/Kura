@@ -59,11 +59,13 @@ impl Parser {
                 if self.token_siguiente == Token::Asignacion {
                     self.parse_reasignacion()
                 } else if self.token_siguiente == Token::ParentesisAbre {
-                    self.parse_llamada_suelta()      // <-- LEEMOS LLAMADAS (Ej: atacar())
+                    self.parse_llamada_suelta()
                 } else {
+                    println!("Error Parser [Instruccion]: Variable suelta o palabra no reconocida: {:?} {:?}", self.token_actual, self.token_siguiente);
                     self.avanzar();
                     None
                 }
+
             }
             _ => {
                 println!("Error Parser [General]: No se reconocio la instruccion. Ignorando token: {:?}", self.token_actual);
@@ -166,11 +168,6 @@ impl Parser {
             self.avanzar();
         }
 
-        if self.token_actual != Token::DosPuntos { return None; }
-        self.avanzar();
-
-
-
         if self.token_actual != Token::Asignacion {
             println!("Error Parser [Let]: Esperaba '=' despues de '{}', encontre: {:?}", nombre, self.token_actual);
             return None;
@@ -216,28 +213,43 @@ impl Parser {
     }
 
     fn parse_if(&mut self) -> Option<Declaracion> {
-        self.avanzar();
+        self.avanzar(); // Pasamos el 'if'
         let condicion = self.parse_expresion()?;
+
         if self.token_actual != Token::LlaveAbre { return None; }
-        self.avanzar();
+        self.avanzar(); // Pasamos '{'
+
         let mut consecuencia = Vec::new();
         while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
             if let Some(decl) = self.parse_declaracion() { consecuencia.push(decl); }
         }
-        self.avanzar();
+        self.avanzar(); // Pasamos '}'
+
         let mut alternativa = None;
         if self.token_actual == Token::Else {
-            self.avanzar();
-            if self.token_actual == Token::LlaveAbre {
-                self.avanzar();
+            self.avanzar(); // Pasamos el 'else'
+
+            // --- MAGIA AQUI: SOPORTE PARA 'else if' ---
+            if self.token_actual == Token::If {
+                // Si encontramos un 'if', llamamos a parse_if recursivamente
+                if let Some(decl_if) = self.parse_if() {
+                    // Guardamos todo ese nuevo bloque 'if' como nuestra alternativa
+                    alternativa = Some(vec![decl_if]);
+                }
+            }
+            // ------------------------------------------
+            // Soporte para el 'else' tradicional con llaves { }
+            else if self.token_actual == Token::LlaveAbre {
+                self.avanzar(); // Pasamos '{'
                 let mut bloque_else = Vec::new();
                 while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
                     if let Some(decl) = self.parse_declaracion() { bloque_else.push(decl); }
                 }
-                self.avanzar();
+                self.avanzar(); // Pasamos '}'
                 alternativa = Some(bloque_else);
             }
         }
+
         Some(Declaracion::If { condicion, consecuencia, alternativa })
     }
 
@@ -303,7 +315,13 @@ impl Parser {
 
     fn parse_return(&mut self) -> Option<Declaracion> {
         self.avanzar(); // pasamos 'return'
-        let valor = self.parse_expresion()?;
+        let valor = match self.parse_expresion() {
+            Some(v) => v,
+            None => {
+                println!("Error Parser [Return]: Expresion invalida despues de 'return'. Token atascado en: {:?}", self.token_actual);
+                return None;
+            }
+        };
         if self.token_actual == Token::PuntoYComa { self.avanzar(); }
         Some(Declaracion::Return { valor })
     }
@@ -412,18 +430,29 @@ impl Parser {
         let mut pares = Vec::new();
 
         while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
-            // Leer clave (permitimos cadenas "nombre" o identificadores directos nombre)
             let clave = match &self.token_actual {
                 Token::Cadena(c) => c.clone(),
                 Token::Identificador(i) => i.clone(),
-                _ => return None,
+                _ => {
+                    println!("Error Parser [Diccionario]: Esperaba 'clave', encontre: {:?}", self.token_actual);
+                    return None;
+                }
             };
             self.avanzar();
 
-            if self.token_actual != Token::DosPuntos { return None; }
+            if self.token_actual != Token::DosPuntos {
+                println!("Error Parser [Diccionario]: Esperaba ':' despues de la clave '{}', encontre: {:?}", clave, self.token_actual);
+                return None;
+            }
             self.avanzar(); // pasamos ':'
 
-            let valor = self.parse_expresion()?;
+            let valor = match self.parse_expresion() {
+                Some(v) => v,
+                None => {
+                    println!("Error Parser [Diccionario]: Valor invalido para la clave '{}'", clave);
+                    return None;
+                }
+            };
             pares.push((clave, valor));
 
             if self.token_actual == Token::Coma {
@@ -431,7 +460,10 @@ impl Parser {
             }
         }
 
-        if self.token_actual != Token::LlaveCierra { return None; }
+        if self.token_actual != Token::LlaveCierra {
+            println!("Error Parser [Diccionario]: Esperaba '}}' al final del diccionario, encontre: {:?}", self.token_actual);
+            return None;
+        }
         self.avanzar(); // pasamos '}'
         Some(Expresion::Diccionario(pares))
     }
