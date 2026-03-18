@@ -66,6 +66,7 @@ impl Parser {
                 }
             }
             _ => {
+                println!("Error Parser [General]: No se reconocio la instruccion. Ignorando token: {:?}", self.token_actual);
                 self.avanzar();
                 None
             }
@@ -135,35 +136,55 @@ impl Parser {
         Some(Declaracion::Importar { elementos, archivo })
     }
     fn parse_declaracion_let(&mut self) -> Option<Declaracion> {
-        self.avanzar();
+        self.avanzar(); // Pasamos 'let'
         let mut es_mut = false;
         if self.token_actual == Token::Mut {
             es_mut = true;
             self.avanzar();
         }
+
         let nombre = match &self.token_actual {
-            Token::Identificador(nombre) => nombre.clone(),
-            _ => return None,
+            Token::Identificador(n) => n.clone(),
+            _ => {
+                println!("Error Parser [Let]: Esperaba nombre de variable, encontre: {:?}", self.token_actual);
+                return None;
+            }
         };
         self.avanzar();
-        if self.token_actual != Token::DosPuntos { return None; }
-        self.avanzar();
+
         let mut tipo = "inferido".to_string();
         if self.token_actual == Token::DosPuntos {
             self.avanzar();
             tipo = match &self.token_actual {
                 Token::Tipo(t) => t.clone(),
                 Token::Identificador(t) => t.clone(), // Por si usan un tipo no registrado
-                _ => return None,
+                _ => {
+                    println!("Error Parser [Let]: Tipo invalido para '{}', encontre: {:?}", nombre, self.token_actual);
+                    return None;
+                }
             };
             self.avanzar();
         }
-        self.avanzar();
-        if self.token_actual != Token::Asignacion { return None; }
+
+        if self.token_actual != Token::DosPuntos { return None; }
         self.avanzar();
 
 
-        let valor = self.parse_expresion()?;
+
+        if self.token_actual != Token::Asignacion {
+            println!("Error Parser [Let]: Esperaba '=' despues de '{}', encontre: {:?}", nombre, self.token_actual);
+            return None;
+        }
+        self.avanzar();
+
+
+        let valor = match self.parse_expresion() {
+            Some(expr) => expr,
+            None => {
+                println!("Error Parser [Let]: No se reconocio el valor asignado a '{}'. Token atascado en: {:?}", nombre, self.token_actual);
+                return None;
+            }
+        };
 
         if self.token_actual == Token::PuntoYComa { self.avanzar(); }
         Some(Declaracion::Let { es_mut, nombre, tipo, valor })

@@ -348,15 +348,15 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                 }
             }
 
-            if nombre == "leer_archivo" && argumentos.len() == 1 {
-                let ruta_eval = evaluar_expresion(argumentos[0].clone(), entorno);
-                if let ObjetoKura::Cadena(ruta) = ruta_eval {
-                    match std::fs::read_to_string(&ruta) {
-                        Ok(contenido) => return ObjetoKura::Cadena(contenido),
-                        Err(_) => {
-                            println!("Error: No se pudo leer el archivo '{}'", ruta);
-                            return ObjetoKura::Nulo;
-                        }
+            // En evaluar_expresion, dentro del if nombre == "len":
+            if nombre == "len" && argumentos.len() == 1 {
+                let arg_eval = evaluar_expresion(argumentos[0].clone(), entorno);
+                match arg_eval {
+                    ObjetoKura::Cadena(s) => return ObjetoKura::Entero(s.chars().count() as i64),
+                    ObjetoKura::Arreglo(arr) => return ObjetoKura::Entero(arr.len() as i64),
+                    _ => {
+                        println!("Error Kura: 'len' fallo porque la variable evaluo a Nulo o no existe.");
+                        return ObjetoKura::Entero(0); // <-- Devuelve 0 en vez de Nulo para evitar que el while explote
                     }
                 }
             }
