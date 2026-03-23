@@ -36,6 +36,7 @@ impl TipoKura {
                     TipoKura::Arreglo(Box::new(TipoKura::de_objeto(&arr[0])))
                 }
             },
+
             ObjetoKura::Diccionario(_) => TipoKura::Diccionario(Box::new(TipoKura::Desconocido)),
             ObjetoKura::Funcion { .. } => TipoKura::Funcion {
                 params: vec![],

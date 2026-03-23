@@ -75,6 +75,41 @@ impl Entorno {
             }
             ObjetoKura::Nulo
         }));
+        // 3. native_anexar_archivo(ruta, contenido)
+        variables.insert("native_anexar_archivo".to_string(), ObjetoKura::FuncionNativa(|args| {
+            use std::io::Write;
+            if args.len() != 2 { return ObjetoKura::Nulo; }
+            if let (ObjetoKura::Cadena(ruta), ObjetoKura::Cadena(contenido)) = (&args[0], &args[1]) {
+                let archivo = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(ruta);
+
+                if let Ok(mut file) = archivo {
+                    // Usamos writeln! para que cada anexo sea una línea nueva
+                    let _ = writeln!(file, "{}", contenido);
+                    return ObjetoKura::Booleano(true);
+                }
+            }
+            ObjetoKura::Booleano(false)
+        }));
+        // 4. native_obtener_tiempo() -> Devuelve segundos desde 1970
+        variables.insert("native_obtener_tiempo".to_string(), ObjetoKura::FuncionNativa(|_| {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let segs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            ObjetoKura::Entero(segs as i64)
+        }));
+
+        // 5. native_dormir(milisegundos) -> Pausa la ejecución
+        variables.insert("native_dormir".to_string(), ObjetoKura::FuncionNativa(|args| {
+            if let Some(ObjetoKura::Entero(ms)) = args.get(0) {
+                std::thread::sleep(std::time::Duration::from_millis(*ms as u64));
+            }
+            ObjetoKura::Nulo
+        }));
 
         // 2. native_escribir_archivo(ruta, contenido)
         variables.insert("native_escribir_archivo".to_string(), ObjetoKura::FuncionNativa(|args| {
@@ -275,28 +310,60 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: Rc<RefCell<Entorno>>) 
             ObjetoKura::Nulo
         }
         Declaracion::Importar { elementos, archivo } => {
-            let contenido = match std::fs::read_to_string(&archivo) {
-                Ok(c) => c,
-                Err(_) => {
-                    println!("Error Kura: No se pudo abrir el modulo '{}'", archivo);
-                    return ObjetoKura::Nulo;
-                }
-            };
+            use std::path::PathBuf;
 
-            let lexer = crate::lexer::Lexer::new(&contenido);
-            let mut parser = crate::parser::Parser::new(lexer, &contenido);
-            let programa_modulo = parser.parse_programa();
+            let mut nombre_archivo = PathBuf::from(&archivo);
+            if nombre_archivo.extension().and_then(|s| s.to_str()) != Some("kr") {
+                nombre_archivo.set_extension("kr");
+            }
 
-            let entorno_modulo = Entorno::new();
-            evaluar_programa(programa_modulo, Rc::clone(&entorno_modulo));
+            let rutas_busqueda = vec![
+                PathBuf::from("."),
+                PathBuf::from("kura_modules"),
+                PathBuf::from("C:/Kura/std"),
+            ];
 
-            for nombre in elementos {
-                if let Some(valor) = entorno_modulo.borrow().obtener(&nombre) {
-                    entorno.borrow_mut().guardar(nombre, valor);
-                } else {
-                    println!("Error Kura: '{}' no fue encontrado dentro de '{}'", nombre, archivo);
+            let mut contenido = None;
+            let mut ruta_encontrada = String::new();
+
+            for base in rutas_busqueda {
+                let intento = base.join(&nombre_archivo);
+                if intento.exists() {
+                    if let Ok(c) = std::fs::read_to_string(&intento) {
+                        ruta_encontrada = intento.to_string_lossy().to_string();
+                        contenido = Some(c);
+                        break;
+                    }
                 }
             }
+
+            match contenido {
+                Some(contenido_final) => {
+                    let lexer = crate::lexer::Lexer::new(&contenido_final);
+                    let mut parser = crate::parser::Parser::new(lexer, &contenido_final);
+                    let programa_modulo = parser.parse_programa();
+
+                    let entorno_modulo = Entorno::new();
+                    evaluar_programa(programa_modulo, Rc::clone(&entorno_modulo));
+
+                    for nombre in elementos {
+                        if let Some(valor) = entorno_modulo.borrow().obtener(&nombre) {
+                            entorno.borrow_mut().guardar(nombre, valor);
+                        }
+                        // --- CORRECCIÓN AQUÍ: Quitamos .borrow() y .borrow_mut() de .structs ---
+                        else if let Some(def_struct) = entorno_modulo.borrow().structs.get(&nombre).cloned() {
+                            entorno.borrow_mut().structs.insert(nombre.clone(), def_struct);
+                        }
+                        else {
+                            println!("Error Kura: '{}' no fue encontrado en '{}'", nombre, ruta_encontrada);
+                        }
+                    }
+                }
+                None => {
+                    println!("Error Kura: No se pudo encontrar el modulo '{}' en las rutas de busqueda.", archivo);
+                }
+            }
+
             ObjetoKura::Nulo
         },
         Declaracion::Struct { nombre, campos, metodos } => {
@@ -428,13 +495,25 @@ fn evaluar_expresion(expresion: Expresion, entorno: Rc<RefCell<Entorno>>) -> Obj
                     _ => ObjetoKura::Nulo,
                 };
             }
-            if let (ObjetoKura::Cadena(i), ObjetoKura::Cadena(d)) = (&izq_val, &der_val) {
-                return match operador {
-                    Token::Igualdad => ObjetoKura::Booleano(i == d),
-                    Token::Diferente => ObjetoKura::Booleano(i != d),
-                    Token::Suma => ObjetoKura::Cadena(format!("{}{}", i, d)),
-                    _ => ObjetoKura::Nulo,
-                };
+            // --- MEJORA: Sumar Cadena + Cualquier cosa (Entero, Bool, etc) ---
+            if let ObjetoKura::Cadena(i) = &izq_val {
+                if operador == Token::Suma {
+                    let der_str = match &der_val {
+                        ObjetoKura::Entero(n) => n.to_string(),
+                        ObjetoKura::Cadena(s) => s.clone(),
+                        ObjetoKura::Booleano(b) => b.to_string(),
+                        _ => "null".to_string(),
+                    };
+                    return ObjetoKura::Cadena(format!("{}{}", i, der_str));
+                }
+                // Si es comparación (== o !=) con otra cadena
+                if let ObjetoKura::Cadena(d) = &der_val {
+                    return match operador {
+                        Token::Igualdad => ObjetoKura::Booleano(i == d),
+                        Token::Diferente => ObjetoKura::Booleano(i != d),
+                        _ => ObjetoKura::Nulo,
+                    };
+                }
             }
             ObjetoKura::Nulo
         }
@@ -608,6 +687,7 @@ pub fn imprimir_objeto(obj: &ObjetoKura) {
             }
             print!("]");
         }
+        ObjetoKura::FuncionNativa(_) => print!("[Funcion Nativa de Rust]"),
         ObjetoKura::Nulo => print!("null"),
         ObjetoKura::Funcion { .. } => print!("[Funcion]"),
         ObjetoKura::Variante { nombre_enum: _, nombre_variante, valores } => {

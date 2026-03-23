@@ -612,6 +612,7 @@ impl Parser {
             Token::False => { self.avanzar(); Expresion::Booleano(false) },
             Token::LlaveAbre => self.parse_diccionario()?,
             Token::CorcheteAbre => self.parse_arreglo()?,
+
             Token::Identificador(nom) => {
                 let id = nom.clone();
                 // ¿Es el inicio de un 'Persona { ... }'?
@@ -621,6 +622,18 @@ impl Parser {
                 } else {
                     self.avanzar();
                     Expresion::Identificador(id)
+                }
+            },
+            // --- NUEVO: SOPORTE PARA NÚMEROS NEGATIVOS ---
+            Token::Resta => {
+                self.avanzar(); // Saltamos el '-'
+                if let Token::Entero(n) = self.token_actual {
+                    let valor = n;
+                    self.avanzar();
+                    // Usamos Expresion::Entero directamente
+                    Expresion::Entero(-valor)
+                } else {
+                    return None;
                 }
             },
             _ => return None,

@@ -1,23 +1,6 @@
-struct Archivo {
-    ruta: Cadena,
+// Kura ahora buscará automáticamente en 'kura_modules'
+import { sumar, cuadrado } from "matematicas";
 
-    fn escribir(self, contenido: Cadena) {
-        native_escribir_archivo(self.ruta, contenido);
-        print "Archivo guardado con exito!";
-    }
-
-    fn leer(self) {
-        let texto = native_leer_archivo(self.ruta);
-        print "Contenido del archivo:";
-        print texto;
-    }
-}
-
-// 1. Instanciamos nuestra nueva herramienta
-let mi_archivo = Archivo { ruta: "secreto.txt" };
-
-// 2. Kura se comunica con el Sistema Operativo
-mi_archivo.escribir("Hola desde Kura! Este archivo fue creado por mi propio lenguaje.");
-
-// 3. Leemos el disco duro
-mi_archivo.leer();
+print "Usando libreria externa:";
+print sumar(10, 5);
+print cuadrado(4);
