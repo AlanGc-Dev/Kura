@@ -40,9 +40,10 @@ pub enum Declaracion {
         iterable: Expresion,
         cuerpo: Vec<Declaracion>,
     },
-    Funcion {                   // <-- NUEVO: Para crear 'fn atacar() { ... }'
+    Funcion {
         nombre: String,
-        parametros: Vec<String>,
+        parametros: Vec<(String, Option<TipoKura>)>, // <-- Ahora soporta el tipo opcional
+        retorno: Option<TipoKura>,                   // <-- Retorno opcional
         cuerpo: Vec<Declaracion>,
     },
     Return {                    // <-- NUEVO: Para 'return 100;'

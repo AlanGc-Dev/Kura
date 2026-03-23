@@ -1,0 +1,10 @@
+fn sumar_estricto(a: Entero, b: Entero): Entero {
+    return a + b;
+}
+
+fn sumar_dinamico(a, b) {
+    return a + b;
+}
+
+print sumar_estricto(10, 5);
+print sumar_dinamico("Hola ", "Mundo");

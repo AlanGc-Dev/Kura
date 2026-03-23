@@ -433,7 +433,9 @@ impl Parser {
         Some(Declaracion::For { variable, iterable, cuerpo })
     }
 
-    // --- NUEVO: PARSEAR FUNCIONES ---
+    // --- NUEVO: PARSEAR FUNCIONES CON TIPOS ESTRICTOS ---
+    // --- NUEVO: PARSEAR FUNCIONES (TIPO KOTLIN, OPCIONALES) ---
+    // --- NUEVO: PARSEAR FUNCIONES (TIPO KOTLIN, OPCIONALES) ---
     fn parse_funcion(&mut self) -> Option<Declaracion> {
         self.avanzar(); // pasamos 'fn'
         let nombre = match &self.token_actual {
@@ -446,26 +448,52 @@ impl Parser {
 
         let mut parametros = Vec::new();
         if let Token::Identificador(p) = &self.token_actual {
-            parametros.push(p.clone());
+            let nombre_param = p.clone();
             self.avanzar();
+
+            let mut tipo_param = None;
             if self.token_actual == Token::DosPuntos {
-                self.avanzar(); self.avanzar(); // saltar tipo
-            }
-        }
-        while self.token_actual == Token::Coma {
-            self.avanzar();
-            if let Token::Identificador(p) = &self.token_actual {
-                parametros.push(p.clone());
+                self.avanzar(); // pasamos ':'
+                let tipo_str = match &self.token_actual {
+                    Token::Tipo(t) | Token::Identificador(t) => t.clone(),
+                    _ => return None,
+                };
+                tipo_param = TipoKura::from_string(&tipo_str);
                 self.avanzar();
+            }
+            parametros.push((nombre_param, tipo_param));
+        }
+
+        while self.token_actual == Token::Coma {
+            self.avanzar(); // pasamos ','
+            if let Token::Identificador(p) = &self.token_actual {
+                let nombre_param = p.clone();
+                self.avanzar();
+
+                let mut tipo_param = None;
                 if self.token_actual == Token::DosPuntos {
-                    self.avanzar(); self.avanzar(); // saltar tipo
+                    self.avanzar(); // pasamos ':'
+                    let tipo_str = match &self.token_actual {
+                        Token::Tipo(t) | Token::Identificador(t) => t.clone(),
+                        _ => return None,
+                    };
+                    tipo_param = TipoKura::from_string(&tipo_str);
+                    self.avanzar();
                 }
+                parametros.push((nombre_param, tipo_param));
             }
         }
         if self.token_actual == Token::ParentesisCierra { self.avanzar(); }
 
-        if self.token_actual == Token::Flecha {
-            self.avanzar(); self.avanzar(); // saltar tipo de retorno
+        let mut retorno = None;
+        if self.token_actual == Token::DosPuntos { // Retorno opcional estilo Kotlin
+            self.avanzar(); // pasamos ':'
+            let tipo_str = match &self.token_actual {
+                Token::Tipo(t) | Token::Identificador(t) => t.clone(),
+                _ => return None,
+            };
+            retorno = TipoKura::from_string(&tipo_str);
+            self.avanzar();
         }
 
         if self.token_actual != Token::LlaveAbre { return None; }
@@ -477,9 +505,8 @@ impl Parser {
         }
         self.avanzar(); // pasamos '}'
 
-        Some(Declaracion::Funcion { nombre, parametros, cuerpo })
+        Some(Declaracion::Funcion { nombre, parametros, retorno, cuerpo })
     }
-
     fn parse_return(&mut self) -> Option<Declaracion> {
         self.avanzar(); // pasamos 'return'
         let valor = match self.parse_expresion() {

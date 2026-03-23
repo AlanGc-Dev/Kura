@@ -2,355 +2,147 @@
 
 ## 🎯 Descripción General
 
-**KURA** es un lenguaje de programación interpretado de propósito general, escrito en Rust. El objetivo es crear un lenguaje simple, intuitivo y con una sintaxis clara, especialmente diseñado para ser fácil de aprender y entender.
+**KURA** es un lenguaje de programación de propósito general, escrito en Rust. El objetivo es crear un lenguaje con una sintaxis simple e intuitiva, fácil de aprender, pero con el poder y la velocidad de lenguajes compilados y de tipado estático como Rust.
 
-**Versión Actual:** 0.1.0  
-**Estado:** En desarrollo activo  
+**Versión Actual:** 0.2.0 (En transición)
+**Estado:** En desarrollo activo
 **Extensión de archivos:** `.kr`
 
 ---
 
-## 📁 Estructura del Proyecto
+## 💡 Visión y Filosofía
 
-```
-Kura/
-├── Cargo.toml              # Configuración del proyecto Rust
-├── src/
-│   ├── main.rs             # Punto de entrada, gestor de archivos y flujo principal
-│   ├── token.rs            # Definición de tokens (palabras clave, símbolos, literales)
-│   ├── lexer.rs            # Analizador léxico (tokenización del código)
-│   ├── parser.rs           # Analizador sintáctico (construcción del AST)
-│   ├── ast.rs              # Árbol de sintaxis abstracta (estructura del programa)
-│   └── evaluator.rs        # Motor de evaluación (ejecución del programa)
-└── target/                 # Artefactos compilados de Rust
-```
+Kura aspira a ser un lenguaje que combine lo mejor de dos mundos:
 
----
+1.  **La simplicidad y facilidad de aprendizaje** de lenguajes de scripting como Python.
+2.  **La seguridad, velocidad y concurrencia** que ofrece el tipado estático y la compilación, inspirándose en Rust.
 
-## 🔧 Componentes Principales
+**Principios de Diseño:**
 
-### 1. **Lexer** (`lexer.rs`)
-- **Propósito:** Analiza el código fuente carácter por carácter y genera tokens.
-- **Responsabilidades:**
-  - Reconoce palabras clave (`let`, `mut`, `print`, `if`, `while`, `fn`, `return`, etc.)
-  - Identifica símbolos y operadores (`+`, `-`, `*`, `/`, `==`, `&&`, `||`, `->`)
-  - Parsea identificadores, números enteros y cadenas de texto
-  - Maneja espacios en blanco y comentarios
-
-### 2. **Token** (`token.rs`)
-- **Definición:** Enumeración que lista todos los tipos de tokens reconocibles.
-- **Palabras clave** incluidas:
-  - Variables: `let`, `mut`
-  - Control de flujo: `if`, `else`, `while`, `break`
-  - Funciones: `fn`, `return`
-  - Operaciones: `print`
-  - Booleanos: `true`, `false`
-  - Operadores lógicos: `and`, `or`
-- **Operadores matemáticos:** `+`, `-`, `*`, `/`
-- **Operadores de comparación:** `==`, `<`, `>`
-- **Símbolos especiales:** `:`, `=`, `;`, `->`, `[`, `]`, `(`, `)`, `{`, `}`
-
-### 3. **Parser** (`parser.rs`)
-- **Propósito:** Convierte la secuencia de tokens en un Árbol de Sintaxis Abstracta (AST).
-- **Manejo de:**
-  - Declaraciones de variables (`let`)
-  - Declaraciones de funciones (`fn`)
-  - Sentencias de control (`if`, `while`, `break`)
-  - Expresiones matemáticas y lógicas
-  - Llamadas a funciones
-  - Reasignaciones de variables
-  - Importaciones de módulos
-
-### 4. **AST** (`ast.rs`)
-- **Estructura:** Define los nodos del árbol de sintaxis.
-- **Tipos principales:**
-  - **Programa:** Conjunto de declaraciones
-  - **Declaraciones:** 
-    - `Let` - declaración de variables
-    - `Print` - impresión en pantalla
-    - `If/Else` - condicionales
-    - `While` - bucles
-    - `Funcion` - definición de funciones
-    - `Return` - retorno de valores
-    - `LlamadaSuelta` - llamada a función sin asignación
-    - `Reasignacion` - modificación de variables
-    - `Importar` - carga de módulos
-  - **Expresiones:**
-    - Literales: `Entero`, `Cadena`, `Booleano`
-    - Variables: `Identificador`
-    - Operaciones: `Operacion` (con operador y operandos)
-    - Colecciones: `Arreglo`, `Diccionario`
-    - Acceso: `Indice` (para arrays/dicts)
-    - Funciones: `Llamada`
-
-### 5. **Evaluator** (`evaluator.rs`)
-- **Propósito:** Ejecuta el programa interpretado.
-- **Características:**
-  - Mantiene un entorno (`Entorno`) que almacena variables en memoria
-  - Evalúa declaraciones y expresiones
-  - Maneja tipos: `Entero`, `Booleano`, `Cadena`, `Arreglo`, `Funcion`, `Diccionario`, `Nulo`
-  - Controla el flujo con `Break` y `Retorno`
-  - Soporta funciones con parámetros y cuerpo
-  - Gestiona diccionarios con HashMap
+*   **Sintaxis Limpia y Mínima:** El código debe ser fácil de leer y escribir, eliminando caracteres innecesarios (`print()` en lugar de `print`, `if condicion` en lugar de `if (condicion)`).
+*   **Tipado Estático con Inferencia:** La seguridad del tipado sin la verbosidad. El compilador debe ser lo suficientemente inteligente como para inferir tipos en la mayoría de los casos (`let x = 10;` en lugar de `let x: Entero = 10;`).
+*   **Rendimiento Primero:** Kura debe ser compilado a código nativo (posiblemente vía LLVM) para alcanzar un rendimiento comparable al de Rust o C.
+*   **Seguridad sin Complejidad Excesiva:** Inspirado en Rust, pero con un enfoque pragmático. Inicialmente, se usará un recolector de basura, con la posibilidad de explorar un modelo de memoria más avanzado en el futuro.
 
 ---
 
-## 🎮 Cómo Funciona el Flujo Principal
+## ✨ Características Actuales y Futuras
 
-```
-Entrada (.kr file)
-    ↓
-[LEXER] - Tokenización
-    ↓
-[PARSER] - Construcción del AST
-    ↓
-[EVALUATOR] - Interpretación y ejecución
-    ↓
-Salida (Printed Results)
-```
+A continuación se muestra un resumen del estado actual del lenguaje y las próximas características planeadas.
 
-**Flujo en `main.rs`:**
-1. Lee argumentos de línea de comandos (ruta del archivo `.kr`)
-2. Valida que sea un archivo `.kr`
-3. Lee el contenido del archivo
-4. Crea un Lexer y Parser
-5. Genera el AST
-6. Crea un Entorno (memoria)
-7. Evalúa el programa
+### Implementado (v0.1.0)
 
----
-
-## ✨ Características Implementadas
-
-### Tipos de Datos
-- ✅ Enteros (`i64`)
-- ✅ Cadenas de texto (`String`)
-- ✅ Booleanos (`true`, `false`)
-- ✅ Arreglos (`[1, 2, 3]`)
-- ✅ Diccionarios (`{"clave": valor}`)
-- ✅ Funciones
-
-### Declaraciones
-- ✅ Variables inmutables: `let x: Entero = 5;`
-- ✅ Variables mutables: `let mut x: Entero = 5;`
-- ✅ Print: `print x;`
-- ✅ Reasignación: `x = 10;`
-- ✅ Condicionales: `if condicion { } else { }`
-- ✅ Bucles: `while condicion { }`
-- ✅ Break: salir de bucles
-- ✅ Funciones: `fn nombre(param1, param2) { }`
-- ✅ Return: `return valor;`
-- ✅ Importaciones: `import f1, f2 from "archivo.kr";`
-
-### Expresiones y Operadores
-- ✅ Operadores matemáticos: `+`, `-`, `*`, `/`
-- ✅ Comparación: `==`, `<`, `>`
-- ✅ Lógica: `&&`, `||`
-- ✅ Acceso a índices: `array[0]`, `dict["key"]`
-- ✅ Llamadas a funciones: `funcion(arg1, arg2)`
+*   **Tipos de Datos:**
+    *   ✅ Enteros (`i64`), Cadenas (`String`), Booleanos (`true`, `false`).
+    *   ✅ Colecciones: Arreglos (`[1, 2, 3]`) y Diccionarios (`{"clave": valor}`).
+*   **Estructuras de Control:**
+    *   ✅ Variables inmutables (`let`) y mutables (`let mut`).
+    *   ✅ Condicionales (`if-else`, `else if`).
+    *   ✅ Bucles (`while`, `for..in`).
+    *   ✅ Funciones (`fn`) y retornos (`return`).
+*   **Sistema de Módulos:**
+    *   ✅ Importación de código desde otros archivos con `import {..} from "..."`.
+*   **Características Avanzadas (inspiradas en Rust):**
+    *   ✅ **Enums:** Definición de tipos de datos algebraicos.
+    *   ✅ **Pattern Matching:** Uso de `match` para desestructurar `enums` y otros valores.
+*   **Operadores:**
+    *   ✅ Aritméticos (`+`, `-`, `*`, `/`, `%`, `**`).
+    *   ✅ Lógicos (`&&`, `||`).
+    *   ✅ De comparación (`==`, `!=`, `<`, `>`, `<=`, `>=`).
+*   **Funciones Nativas:**
+    *   ✅ `len()`, `a_numero()`, `a_texto()`, `escribir_archivo()`, y más.
 
 ---
 
-## 🚀 Cómo Usar KURA
+## 🚀 Roadmap: De un Lenguaje Interpretado a uno Compilado
 
-### Compilar el proyecto
-```bash
-cargo build --release
-```
+Para convertir a Kura en un lenguaje potente y rápido, se proponen las siguientes fases de desarrollo.
 
-### Ejecutar un archivo Kura
-```bash
-./target/release/Kura archivo.kr
-```
+### Fase 1: Simplificación de Sintaxis y Mejora de la Experiencia de Desarrollador (DX)
 
-### Ejemplo de programa Kura (Mi_Programa.kr)
-```kura
-let x: Entero = 10;
-let mut y: Entero = 5;
+*   **🎯 Objetivo:** Hacer el lenguaje más limpio y fácil de usar.
+*   **Tareas:**
+    *   [ ] **Puntos y Coma Opcionales:** Modificar el parser para que los `;` al final de las declaraciones no sean obligatorios.
+    *   [ ] **Función `println()`:** Reemplazar la declaración `print` por una función nativa `println()` para mayor consistencia.
+    *   [ ] **Mejora de Mensajes de Error:** Implementar un sistema de reporte de errores que indique línea, columna y ofrezca sugerencias.
+        *   *Ejemplo: "Error de tipo en la línea 5: esperabas un Entero pero recibiste una Cadena."*
+    *   [ ] **Implementar `structs`:** Añadir soporte para la definición de estructuras de datos personalizadas, un pilar para cualquier lenguaje de tipado estático.
+        ```kura
+        struct Personaje {
+            nombre: Cadena,
+            puntos_de_vida: Entero,
+            esta_vivo: Booleano,
+        }
+        ```
 
-print x;
-print y;
+### Fase 2: Transición a Tipado Estático y Pre-compilación
 
-y = 20;
-print y;
+*   **🎯 Objetivo:** Introducir el análisis de tipos estático para eliminar errores en tiempo de ejecución y sentar las bases para la compilación.
+*   **Tareas:**
+    *   [ ] **Analizador Semántico (Type Checker):**
+        *   Crear un nuevo componente en el compilador que recorra el AST *antes* del evaluador.
+        *   Su función será verificar que todas las operaciones son válidas según los tipos.
+    *   [ ] **Inferencia de Tipos (Hindley-Milner):**
+        *   Implementar un algoritmo de inferencia para que el programador no necesite declarar todos los tipos. El compilador los deducirá.
+        *   `let numero = 10;` // -> `numero` es `Entero`
+        *   `let texto = "hola";` // -> `texto` es `Cadena`
+    *   [ ] **Sistema de Errores de Tipado:** El `Type Checker` debe ser capaz de detener la compilación si encuentra un error de tipo.
 
-if x < y {
-    print "x es menor que y";
-} else {
-    print "x es mayor o igual a y";
-}
+### Fase 3: Compilación a Código Nativo (Backend LLVM)
 
-while y > 0 {
-    print y;
-    y = y - 1;
-}
+*   **🎯 Objetivo:** Reemplazar el evaluador (intérprete) por un compilador que genere código máquina de alto rendimiento.
+*   **Tareas:**
+    *   [ ] **Generación de IR (Intermediate Representation):**
+        *   El `Type Checker` producirá un AST verificado que se traducirá a un IR, como LLVM IR.
+    *   [ ] **Integración con LLVM:**
+        *   Utilizar las bibliotecas de Rust para LLVM (como `inkwell` o `llvm-sys`) para construir el IR y compilarlo a un ejecutable nativo.
+    *   [ ] **Gestión de Memoria:**
+        *   Inicialmente, integrar un **Recolector de Basura (Garbage Collector)** para una gestión de memoria automática y segura.
+        *   A largo plazo, se podría investigar un modelo de `ownership` y `borrowing` simplificado.
 
-fn saludar(nombre) {
-    print nombre;
-}
+### Fase 4: Ecosistema y Funcionalidades Avanzadas
 
-saludar("Mundo");
-
-let numeros: Arreglo = [1, 2, 3, 4, 5];
-print numeros[0];
-```
-
----
-
-## 🎯 Objetivos de Optimización y Mejora
-
-### 🔴 Prioridad Alta
-
-1. **Simplificar la Sintaxis**
-   - Considerar hacer innecesaria la declaración de tipos (inferencia de tipos)
-   - Ejemplo actual: `let x: Entero = 5;` → Posible: `let x = 5;`
-   - Simplificar sintaxis de funciones
-
-2. **Mejorar Mensajes de Error**
-   - Agregar línea y columna en errores
-   - Mensajes más descriptivos
-   - Sugerencias de corrección
-
-3. **Performance y Optimización**
-   - Optimizar evaluación de expresiones
-   - Cacheo de funciones evaluadas
-   - Reducir clonaciones innecesarias
-
-### 🟡 Prioridad Media
-
-4. **Características de Lenguaje**
-   - Operador módulo `%`
-   - Operadores de potencia `**`
-   - Operadores de asignación compuesta `+=`, `-=`, etc.
-   - Strings interpolados (template literals)
-   - Tuplas
-   - Enums
-
-5. **Control de Flujo Avanzado**
-   - `match` para pattern matching
-   - `for` loops
-   - `continue` en bucles
-   - Try/catch para manejo de errores
-
-6. **Funciones Integradas (Built-ins)**
-   - `len()` - longitud de arrays/strings
-   - `push()` / `pop()` para arreglos
-   - `keys()` / `values()` para diccionarios
-   - `parseInt()`, `parseFloat()`, `toString()`
-   - Funciones matemáticas: `sqrt()`, `pow()`, `max()`, `min()`
-
-### 🟢 Prioridad Baja
-
-7. **Documentación y Testing**
-   - Ejemplos de programas completos
-   - Tests unitarios
-   - Documentación de API interna
-
-8. **Funcionalidades Avanzadas**
-   - Sistema de módulos mejorado
-   - Closures
-   - Decoradores
-   - Program transpilation a JavaScript/Python
+*   **🎯 Objetivo:** Construir una librería estándar robusta y añadir características de lenguajes modernos.
+*   **Tareas:**
+    *   [ ] **Librería Estándar (`std`):**
+        *   Módulos para `io` (archivos, consola), `net` (http), `colecciones` (avanzadas), `os` (sistema operativo).
+    *   [ ] **Manejo de Errores con `Result<T, E>`:**
+        *   Añadir un tipo `Result` nativo y promover su uso para un manejo de errores explícito y robusto, similar a Rust.
+    *   [ ] **Closures:**
+        *   Permitir que las funciones capturen variables de su entorno.
+    *   [ ] **Traits (o Interfaces):**
+        *   Añadir una forma de definir comportamiento compartido entre `structs`.
 
 ---
 
-## 💡 Opciones de Refactorización para Simplificar
-
-### Opción 1: Inferencia de Tipos
-**Cambio:**
-```kura
-// Actual
-let x: Entero = 5;
-let s: Cadena = "hola";
-
-// Propuesto
-let x = 5;
-let s = "hola";
-```
-**Ventajas:** Sintaxis más limpia, menos verbosa  
-**Cambios necesarios:** Modificar parser y evaluator para inferir tipos
-
-### Opción 2: Sintaxis de Función Simplificada
-**Cambio:**
-```kura
-// Actual
-fn saludar(nombre) { print nombre; }
-
-// Propuesto (mismo, pero considerar)
-def saludar(nombre) { print nombre; }
-```
-
-### Opción 3: Importación Simplificada
-**Cambio:**
-```kura
-// Actual
-import f1, f2 from "archivo.kr";
-
-// Propuesto
-use "archivo.kr";
-// o
-include "archivo.kr";
-```
-
----
-
-## 🔍 Análisis Actual de Código
+## 🔍 Análisis de la Arquitectura Actual
 
 ### Fortalezas
-✅ Estructura bien organizada (lexer → parser → ast → evaluator)  
-✅ Sistema modular en Rust  
-✅ Soporte para funciones, bucles y condicionales  
-✅ Tipos de datos básicos y colecciones  
-✅ Sistema de importación de módulos  
 
-### Áreas de Mejora
-- Inferencia de tipos (reducir verbosidad)
-- Mensajes de error más informativos
-- Manejo de excepciones
-- Más funciones integradas
-- Optimización de performance
-- Sistema de tipos más robusto
+*   **✅ Arquitectura Clásica:** La separación en `lexer`, `parser`, `ast` y `evaluator` es un excelente punto de partida, muy modular y fácil de entender.
+*   **✅ Inspiración en Rust:** La inclusión temprana de `enum` y `match` es una gran ventaja y demuestra una visión clara hacia un lenguaje potente.
+*   **✅ Sistema de Módulos Funcional:** La base para construir una librería estándar ya existe.
 
----
+### Debilidades y Plan de Acción
 
-## 📝 Notas Adicionales para IAs
-
-### Para Continuar el Desarrollo
-
-1. **Entender primero:**
-   - El flujo: Lexer → Parser → AST → Evaluator
-   - Cómo se agrega un nuevo token requiere cambio en `token.rs`, `lexer.rs`, `parser.rs`, `ast.rs`, y `evaluator.rs`
-
-2. **Pasos típicos para añadir características:**
-   - Agregue el token en `token.rs`
-   - Agregue reconocimiento en `lexer.rs`
-   - Agregue parsing en `parser.rs`
-   - Agregue nodo AST en `ast.rs`
-   - Agregue evaluación en `evaluator.rs`
-
-3. **Testing:**
-   - Cree archivos `.kr` de prueba
-   - Ejecute con: `cargo run -- archivo.kr`
-
-4. **Compiler command:** 
-   - Debug: `cargo build`
-   - Release: `cargo build --release`
-   - Run: `cargo run -- archivo.kr`
+*   **❌ Interpretado vs. Compilado:** El evaluador actual ejecuta el código línea por línea, lo que es inherentemente lento.
+    *   **Acción:** Las **Fases 2 y 3** del roadmap están diseñadas para reemplazar el evaluador por un compilador.
+*   **❌ Tipado Dinámico:** Los errores de tipo solo se detectan en tiempo de ejecución, lo que es propenso a bugs.
+    *   **Acción:** La **Fase 2** introduce un `Type Checker` para mover la detección de errores a tiempo de compilación.
+*   **❌ Sintaxis Verbosa:** Requerir `let x: Entero = ...` y `;` añade "ruido" al código.
+    *   **Acción:** La **Fase 1** y la **Fase 2 (inferencia de tipos)** se centran en limpiar la sintaxis.
 
 ---
 
-## 🎓 Conclusión
+## 🎓 Conclusión Estratégica
 
-KURA es un proyecto educativo y experimental para crear un lenguaje de programación simple. El código está bien estructurado para extensión y mejora. Las prioridades actuales son:
+Kura tiene un potencial enorme. Ha superado la fase inicial de "demostrar que funciona" y ahora se encuentra en un punto de inflexión estratégico.
 
-1. ✨ Simplificar la sintaxis (especialmente tipos)
-2. 🐛 Mejorar manejo de errores
-3. 📈 Agregar más funciones integradas
-4. 🚀 Optimizar performance
+El siguiente gran paso es evolucionar de un **juguete educativo (lenguaje interpretado)** a una **herramienta potente (lenguaje compilado)**. El roadmap propuesto ofrece un camino claro para lograrlo, priorizando la experiencia del desarrollador, la seguridad del tipado estático y, finalmente, el rendimiento de la compilación nativa.
+
+¡El futuro de Kura es brillante y rápido como Rust!
 
 ---
-
-**Última actualización:** Marzo 2026  
-**Autor:** Equipo de Desarrollo Kura  
+**Última actualización:** Marzo 2026
+**Autor:** Equipo de Desarrollo Kura (con asistencia de IA)
 **Licencia:** (Especificar si aplica)
-

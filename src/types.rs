@@ -1,3 +1,4 @@
+
 use crate::evaluator::ObjetoKura;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,7 +44,7 @@ impl TipoKura {
             _ => TipoKura::Desconocido,
         }
     }
-
+    #[allow(dead_code)]
     pub fn to_string(&self) -> String {
         match self {
             TipoKura::Entero => "Entero".to_string(),

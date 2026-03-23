@@ -1,15 +1,21 @@
+
+
 use std::collections::HashMap;
 use crate::ast::{Programa, Declaracion, Expresion, CasoMatch, Pattern, VarianteEnum};
 use crate::token::Token;
 use crate::types::TipoKura;
-
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ObjetoKura {
     Entero(i64),
     Booleano(bool),
     Cadena(String),
     Arreglo(Vec<ObjetoKura>),
-    Funcion { parametros: Vec<String>, cuerpo: Vec<Declaracion> }, // <-- GUARDAMOS LA FUNCIÓN EN MEMORIA
+    Funcion {
+        parametros: Vec<(String, Option<TipoKura>)>,
+        retorno: Option<TipoKura>,
+        cuerpo: Vec<Declaracion>
+    },
     Retorno(Box<ObjetoKura>), // <-- PARA ATRAPAR EL RETURN
     Variante {                  // <-- NUEVO: Para instancias de enum
         nombre_enum: String,
@@ -162,8 +168,8 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
         }
 
         // --- GOLPE FINAL: LÓGICA DE FUNCIONES ---
-        Declaracion::Funcion { nombre, parametros, cuerpo } => {
-            let funcion = ObjetoKura::Funcion { parametros, cuerpo };
+        Declaracion::Funcion { nombre, parametros, retorno, cuerpo } => {
+            let funcion = ObjetoKura::Funcion { parametros, retorno, cuerpo };
             entorno.guardar(nombre, funcion);
             ObjetoKura::Nulo
         }
@@ -515,22 +521,50 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                 };
             }
 
-            // 2. FUNCIONES DEL USUARIO (Las que tú creas con 'fun' en Kura)
+            // 2. FUNCIONES DEL USUARIO
             let funcion = entorno.obtener(&nombre);
-            if let Some(ObjetoKura::Funcion { parametros, cuerpo }) = funcion {
+            if let Some(ObjetoKura::Funcion { parametros, retorno, cuerpo }) = funcion {
+
+                if argumentos.len() != parametros.len() {
+                    println!("Error Kura: La funcion '{}' espera {} argumentos, recibio {}", nombre, parametros.len(), argumentos.len());
+                    return ObjetoKura::Nulo;
+                }
+
                 let mut entorno_local = entorno.extend();
                 for (i, arg_expr) in argumentos.into_iter().enumerate() {
                     let arg_evaluado = evaluar_expresion(arg_expr, entorno);
-                    if i < parametros.len() {
-                        entorno_local.guardar(parametros[i].clone(), arg_evaluado);
+
+                    // Validar tipo del parámetro opcionalmente
+                    if let Some(tipo_esperado) = &parametros[i].1 {
+                        let tipo_real = TipoKura::de_objeto(&arg_evaluado);
+                        if *tipo_esperado != tipo_real && *tipo_esperado != TipoKura::Desconocido {
+                            println!("Error Kura de Tipos: El parametro '{}' espera un {:?}, pero recibió un {:?}", parametros[i].0, tipo_esperado, tipo_real);
+                            return ObjetoKura::Nulo;
+                        }
                     }
+
+                    entorno_local.guardar(parametros[i].0.clone(), arg_evaluado);
                 }
+
+                let mut valor_retornado = ObjetoKura::Nulo;
                 for decl in cuerpo {
                     let res = evaluar_declaracion(decl, &mut entorno_local);
-                    if let ObjetoKura::Retorno(valor) = res { return *valor; }
+                    if let ObjetoKura::Retorno(valor) = res {
+                        valor_retornado = *valor;
+                        break;
+                    }
                 }
+
+                // Validar retorno opcionalmente
+                if let Some(tipo_ret) = retorno {
+                    let tipo_real_ret = TipoKura::de_objeto(&valor_retornado);
+                    if tipo_ret != tipo_real_ret && tipo_ret != TipoKura::Desconocido {
+                        println!("Error Kura de Tipos: La funcion '{}' debía retornar {:?}, pero retornó {:?}", nombre, tipo_ret, tipo_real_ret);
+                    }
+                }
+
+                return valor_retornado;
             } else {
-                // 🚀 ¡AÑADE ESTA LÍNEA PARA DEPURAR!
                 println!("Error Kura: La funcion '{}' no existe. ¿Olvidaste el import?", nombre);
             }
             ObjetoKura::Nulo
