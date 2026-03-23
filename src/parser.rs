@@ -433,9 +433,7 @@ impl Parser {
         Some(Declaracion::For { variable, iterable, cuerpo })
     }
 
-    // --- NUEVO: PARSEAR FUNCIONES CON TIPOS ESTRICTOS ---
-    // --- NUEVO: PARSEAR FUNCIONES (TIPO KOTLIN, OPCIONALES) ---
-    // --- NUEVO: PARSEAR FUNCIONES (TIPO KOTLIN, OPCIONALES) ---
+    // --- NUEVO: PARSEAR FUNCIONES (BLINDADO Y ROBUSTO) ---
     fn parse_funcion(&mut self) -> Option<Declaracion> {
         self.avanzar(); // pasamos 'fn'
         let nombre = match &self.token_actual {
@@ -447,25 +445,17 @@ impl Parser {
         self.avanzar();
 
         let mut parametros = Vec::new();
-        if let Token::Identificador(p) = &self.token_actual {
-            let nombre_param = p.clone();
-            self.avanzar();
 
-            let mut tipo_param = None;
-            if self.token_actual == Token::DosPuntos {
-                self.avanzar(); // pasamos ':'
-                let tipo_str = match &self.token_actual {
-                    Token::Tipo(t) | Token::Identificador(t) => t.clone(),
-                    _ => return None,
-                };
-                tipo_param = TipoKura::from_string(&tipo_str);
+        // --- BUCLE ROBUSTO PARA PARÁMETROS ---
+        // Leerá hasta encontrar un ')' o llegar al fin del archivo
+        while self.token_actual != Token::ParentesisCierra && self.token_actual != Token::FinDeArchivo {
+
+            // Si encuentra una coma, la saltamos felizmente y continuamos
+            if self.token_actual == Token::Coma {
                 self.avanzar();
+                continue;
             }
-            parametros.push((nombre_param, tipo_param));
-        }
 
-        while self.token_actual == Token::Coma {
-            self.avanzar(); // pasamos ','
             if let Token::Identificador(p) = &self.token_actual {
                 let nombre_param = p.clone();
                 self.avanzar();
@@ -475,14 +465,21 @@ impl Parser {
                     self.avanzar(); // pasamos ':'
                     let tipo_str = match &self.token_actual {
                         Token::Tipo(t) | Token::Identificador(t) => t.clone(),
-                        _ => return None,
+                        _ => {
+                            println!("Error Parser: Esperaba un Tipo de dato para '{}', encontre {:?}", nombre_param, self.token_actual);
+                            return None;
+                        }
                     };
                     tipo_param = TipoKura::from_string(&tipo_str);
                     self.avanzar();
                 }
                 parametros.push((nombre_param, tipo_param));
+            } else {
+                println!("Error Parser: Parametro invalido en funcion '{}': {:?}", nombre, self.token_actual);
+                return None;
             }
         }
+
         if self.token_actual == Token::ParentesisCierra { self.avanzar(); }
 
         let mut retorno = None;
@@ -490,13 +487,19 @@ impl Parser {
             self.avanzar(); // pasamos ':'
             let tipo_str = match &self.token_actual {
                 Token::Tipo(t) | Token::Identificador(t) => t.clone(),
-                _ => return None,
+                _ => {
+                    println!("Error Parser: Esperaba un Tipo de retorno para la funcion, encontre {:?}", self.token_actual);
+                    return None;
+                }
             };
             retorno = TipoKura::from_string(&tipo_str);
             self.avanzar();
         }
 
-        if self.token_actual != Token::LlaveAbre { return None; }
+        if self.token_actual != Token::LlaveAbre {
+            println!("Error Parser: Esperaba '{{' despues de la definicion de la funcion");
+            return None;
+        }
         self.avanzar();
 
         let mut cuerpo = Vec::new();
