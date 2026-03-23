@@ -1,0 +1,7 @@
+enum Result {
+    Ok(valor),
+    Err(mensaje)
+}
+
+let x = Ok(100);
+print x;

@@ -1,0 +1,10 @@
+print "Función llamada";
+
+fn quitar_envoltorio(x) {
+    print "Dentro de función";
+    print x;
+}
+
+print "Antes de llamada";
+quitar_envoltorio(100);
+print "Después de llamada";

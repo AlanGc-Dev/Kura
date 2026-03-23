@@ -1,0 +1,5 @@
+fn quitar_envoltorio(x) {
+    print x;
+}
+
+quitar_envoltorio(100);

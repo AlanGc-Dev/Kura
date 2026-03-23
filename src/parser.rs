@@ -1,28 +1,50 @@
 use crate::lexer::Lexer;
 use crate::token::Token;
-use crate::ast::{Programa, Declaracion, Expresion};
+use crate::ast::{Programa, Declaracion, Expresion, VarianteEnum, CasoMatch, Pattern};
+use crate::types::TipoKura;
 
 pub struct Parser {
     lexer: Lexer,
     token_actual: Token,
     token_siguiente: Token,
+    pub linea_siguiente: usize, // <-- NUEVO
+    pub col_siguiente: usize,
+    pub linea_actual: usize,    // <-- NUEVO
+    pub col_actual: usize,
 }
 
 impl Parser {
     pub fn new(mut lexer: Lexer) -> Self {
         let actual = lexer.next_token();
+        let l_actual = lexer.linea;
+        let c_actual = lexer.columna;
+
         let siguiente = lexer.next_token();
+        let l_sig = lexer.linea;
+        let c_sig = lexer.columna;
 
         Parser {
             lexer,
             token_actual: actual,
+            linea_actual: l_actual,
+            col_actual: c_actual,
             token_siguiente: siguiente,
+            linea_siguiente: l_sig,
+            col_siguiente: c_sig,
         }
     }
 
-    fn avanzar(&mut self) {
+   fn avanzar(&mut self) {
         self.token_actual = self.token_siguiente.clone();
-        self.token_siguiente = self.lexer.next_token();
+        self.linea_actual = self.linea_siguiente;
+        self.col_actual = self.col_siguiente;
+
+        let nuevo_siguiente = self.lexer.next_token();
+        let l = self.lexer.linea;
+        let c = self.lexer.columna;
+        self.token_siguiente = nuevo_siguiente;
+        self.linea_siguiente = l;
+        self.col_siguiente = c;
     }
 
     fn esperar_token(&mut self, token_esperado: Token) -> bool {
@@ -50,22 +72,26 @@ impl Parser {
             Token::Print => self.parse_print(),
             Token::If => self.parse_if(),
             Token::While => self.parse_while(),
+            Token::For => self.parse_for(),
             Token::Fn => self.parse_funcion(),
             Token::Break => self.parse_break(),
+            Token::Enum => self.parse_enum(),
+            Token::Match => self.parse_match(),
             Token::Import => self.parse_declaracion_import(),// <-- LEEMOS FUNCIONES
             Token::Return => self.parse_return(),    // <-- LEEMOS RETORNOS
             Token::Identificador(_) => {
-                // Miramos el siguiente token para saber si es reasignacion o llamada
-                if self.token_siguiente == Token::Asignacion {
-                    self.parse_reasignacion()
-                } else if self.token_siguiente == Token::ParentesisAbre {
-                    self.parse_llamada_suelta()
-                } else {
-                    println!("Error Parser [Instruccion]: Variable suelta o palabra no reconocida: {:?} {:?}", self.token_actual, self.token_siguiente);
-                    self.avanzar();
-                    None
+                // Miramos qué viene después del nombre
+                match self.token_siguiente {
+                    Token::Asignacion => self.parse_reasignacion(),
+                    Token::ParentesisAbre => self.parse_llamada_suelta(),
+                    // 🚀 ¡NUEVO!: Soporte para reasignar diccionarios/arreglos
+                    Token::CorcheteAbre => self.parse_reasignacion_indice(),
+                    _ => {
+                        println!("Error Parser [Instruccion]: Variable suelta o palabra no reconocida: {:?} {:?}", self.token_actual, self.token_siguiente);
+                        self.avanzar();
+                        None
+                    }
                 }
-
             }
             _ => {
                 println!("Error Parser [General]: No se reconocio la instruccion. Ignorando token: {:?}", self.token_actual);
@@ -79,6 +105,126 @@ impl Parser {
         self.avanzar(); // pasamos 'break'
         if self.token_actual == Token::PuntoYComa { self.avanzar(); }
         Some(Declaracion::Break)
+    }
+
+    fn parse_enum(&mut self) -> Option<Declaracion> {
+        self.avanzar(); // pasamos 'enum'
+        let nombre = match &self.token_actual {
+            Token::Identificador(n) => n.clone(),
+            _ => return None,
+        };
+        self.avanzar();
+        if self.token_actual != Token::LlaveAbre { return None; }
+        self.avanzar();
+
+        let mut variantes = Vec::new();
+        while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
+            if let Token::Identificador(var_nombre) = &self.token_actual {
+                let var_name = var_nombre.clone();
+                self.avanzar();
+                let mut campos = Vec::new();
+                
+                // Parsear campos: Ok(valor) o Err(error)
+                if self.token_actual == Token::ParentesisAbre {
+                    self.avanzar();
+                    while self.token_actual != Token::ParentesisCierra {
+                        if let Token::Identificador(campo) = &self.token_actual {
+                            campos.push(campo.clone());
+                            self.avanzar();
+                            if self.token_actual == Token::Coma {
+                                self.avanzar();
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    if self.token_actual == Token::ParentesisCierra { self.avanzar(); }
+                }
+                
+                variantes.push(VarianteEnum { nombre: var_name, campos });
+                
+                // Saltar coma si existe
+                if self.token_actual == Token::Coma { self.avanzar(); }
+            } else {
+                self.avanzar();
+            }
+        }
+        
+        if self.token_actual == Token::LlaveCierra { self.avanzar(); }
+        Some(Declaracion::Enum { nombre, variantes })
+    }
+
+    fn parse_match(&mut self) -> Option<Declaracion> {
+        self.avanzar(); // pasamos 'match'
+        let valor = self.parse_expresion()?;
+        if self.token_actual != Token::LlaveAbre { return None; }
+        self.avanzar();
+
+        let mut casos = Vec::new();
+        while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
+            // Parsear patrón
+            let patron = self.parse_pattern()?;
+            if self.token_actual != Token::FlechaGrande { return None; }
+            self.avanzar();
+
+            // Parsear cuerpo del caso
+            let mut cuerpo = Vec::new();
+            loop {
+                // Detectar fin del caso: coma, siguiente variante, o }
+                if self.token_actual == Token::Coma || 
+                   self.token_actual == Token::LlaveCierra ||
+                   (matches!(&self.token_actual, Token::Identificador(_)) && 
+                    self.token_siguiente != Token::Asignacion) {
+                    break;
+                }
+                if let Some(decl) = self.parse_declaracion() {
+                    cuerpo.push(decl);
+                } else {
+                    break;
+                }
+            }
+
+            casos.push(CasoMatch { patron, cuerpo });
+            
+            if self.token_actual == Token::Coma { self.avanzar(); }
+        }
+
+        if self.token_actual == Token::LlaveCierra { self.avanzar(); }
+        Some(Declaracion::Match { valor, casos })
+    }
+
+    fn parse_pattern(&mut self) -> Option<Pattern> {
+        match &self.token_actual {
+            Token::Identificador(name) => {
+                let name_clone = name.clone();
+                self.avanzar();
+                
+                // Verificar si es comodín (_)
+                if name_clone == "_" {
+                    return Some(Pattern::Comodin);
+                }
+                
+                // Verificar si es variante con campos: Ok(v)
+                if self.token_actual == Token::ParentesisAbre {
+                    self.avanzar();
+                    let mut bindings = Vec::new();
+                    while self.token_actual != Token::ParentesisCierra {
+                        if let Token::Identificador(var) = &self.token_actual {
+                            bindings.push(var.clone());
+                            self.avanzar();
+                            if self.token_actual == Token::Coma { self.avanzar(); }
+                        } else {
+                            break;
+                        }
+                    }
+                    if self.token_actual == Token::ParentesisCierra { self.avanzar(); }
+                    Some(Pattern::Variante { nombre: name_clone, bindings })
+                } else {
+                    Some(Pattern::Identificador(name_clone))
+                }
+            }
+            _ => None,
+        }
     }
 
     fn parse_declaracion_import(&mut self) -> Option<Declaracion> {
@@ -154,10 +300,10 @@ impl Parser {
         };
         self.avanzar();
 
-        let mut tipo = "inferido".to_string();
+        let mut tipo: Option<TipoKura> = None;
         if self.token_actual == Token::DosPuntos {
             self.avanzar();
-            tipo = match &self.token_actual {
+            let tipo_str = match &self.token_actual {
                 Token::Tipo(t) => t.clone(),
                 Token::Identificador(t) => t.clone(), // Por si usan un tipo no registrado
                 _ => {
@@ -165,6 +311,11 @@ impl Parser {
                     return None;
                 }
             };
+            tipo = TipoKura::from_string(&tipo_str);
+            if tipo.is_none() {
+                println!("Error Parser [Let]: Tipo desconocido '{}'", tipo_str);
+                return None;
+            }
             self.avanzar();
         }
 
@@ -190,11 +341,7 @@ impl Parser {
 
     fn parse_print(&mut self) -> Option<Declaracion> {
         self.avanzar();
-        if self.token_actual != Token::ParentesisAbre { return None; }
-        self.avanzar();
         let valor = self.parse_expresion()?;
-        if self.token_actual != Token::ParentesisCierra { return None; }
-        self.avanzar();
         if self.token_actual == Token::PuntoYComa { self.avanzar(); }
         Some(Declaracion::Print { valor })
     }
@@ -264,6 +411,26 @@ impl Parser {
         }
         self.avanzar();
         Some(Declaracion::While { condicion, cuerpo })
+    }
+
+    fn parse_for(&mut self) -> Option<Declaracion> {
+        self.avanzar(); // pasamos 'for'
+        let variable = match &self.token_actual {
+            Token::Identificador(v) => v.clone(),
+            _ => return None,
+        };
+        self.avanzar();
+        if self.token_actual != Token::In { return None; }
+        self.avanzar();
+        let iterable = self.parse_expresion()?;
+        if self.token_actual != Token::LlaveAbre { return None; }
+        self.avanzar();
+        let mut cuerpo = Vec::new();
+        while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
+            if let Some(decl) = self.parse_declaracion() { cuerpo.push(decl); }
+        }
+        self.avanzar();
+        Some(Declaracion::For { variable, iterable, cuerpo })
     }
 
     // --- NUEVO: PARSEAR FUNCIONES ---
@@ -408,7 +575,8 @@ impl Parser {
 
         match self.token_actual {
             Token::Suma | Token::Resta | Token::Multiplicacion | Token::Division |
-            Token::Igualdad | Token::MenorQue | Token::MayorQue |
+            Token::Modulo | Token::Potencia | Token::Igualdad | Token::Diferente |
+            Token::MenorQue | Token::MayorQue | Token::MenorIgual | Token::MayorIgual |
             Token::And | Token::Or => {
                 let operador = self.token_actual.clone();
                 self.avanzar();
@@ -466,5 +634,40 @@ impl Parser {
         }
         self.avanzar(); // pasamos '}'
         Some(Expresion::Diccionario(pares))
+    }
+    fn parse_reasignacion_indice(&mut self) -> Option<Declaracion> {
+        // 1. Obtenemos el nombre (ej: "contador_dict")
+        let nombre = match &self.token_actual {
+            Token::Identificador(n) => n.clone(),
+            _ => return None,
+        };
+        self.avanzar(); // Saltamos el nombre
+        self.avanzar(); // Saltamos el '['
+
+        let indice = self.parse_expresion()?;
+
+        if self.token_actual != Token::CorcheteCierra { return None; }
+        self.avanzar(); // Saltamos el ']'
+
+        if self.token_actual != Token::Asignacion { return None; }
+        self.avanzar(); // Saltamos el '='
+
+        let valor = self.parse_expresion()?;
+        if self.token_actual == Token::PuntoYComa { self.avanzar(); }
+
+        // 🚀 AQUÍ ESTÁ EL TRUCO:
+        // Clonamos 'nombre' en el campo 'nombre' para que la versión original
+        // todavía pueda ser usada dentro del vec![] de abajo.
+        Some(Declaracion::Reasignacion {
+            nombre: nombre.clone(), // <-- Fotocopia aquí
+            valor: Expresion::Llamada {
+                nombre: "reemplazar".to_string(),
+                argumentos: vec![
+                    Expresion::Identificador(nombre), // <-- El original se entrega aquí
+                    indice,
+                    valor
+                ]
+            }
+        })
     }
 }

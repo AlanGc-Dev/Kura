@@ -3,17 +3,39 @@ use crate::token::Token;
 pub struct Lexer {
     input: Vec<char>,
     position: usize,
+    pub linea: usize,
+    pub columna: usize,
 }
+
 impl Lexer {
     pub fn new(input: &str) -> Self {
         Lexer {
             input: input.chars().collect(),
             position: 0,
+            linea: 1,
+            columna: 1,
         }
     }
 
+    fn avanzar_char(&mut self) {
+        if self.position < self.input.len() {
+            if self.input[self.position] == '\n' {
+                self.linea += 1;
+                self.columna = 1;
+            } else {
+                self.columna += 1;
+            }
+            self.position += 1;
+        }
+    }
+
+
+
     pub fn next_token(&mut self) -> Token {
         self.saltar_espacios();
+
+        let _l_token = self.linea;
+        let _c_token = self.columna;
 
         if self.position >= self.input.len() {
             return Token::FinDeArchivo;
@@ -24,7 +46,48 @@ impl Lexer {
         let token = match char_actual {
             ':' => Token::DosPuntos,
             ';' => Token::PuntoYComa,
-            '+' => Token::Suma,
+            '.' => Token::Punto, // <-- Agregado para rutas como "lexer.kr"
+            ',' => Token::Coma,
+            '+' => {
+                if self.position + 1 < self.input.len() && self.input[self.position + 1] == '=' {
+                    self.position += 1;
+                    Token::AsignacionCompuesta
+                } else {
+                    Token::Suma
+                }
+            }
+            '*' => {
+                if self.position + 1 < self.input.len() && self.input[self.position + 1] == '*' {
+                    self.position += 1;
+                    Token::Potencia
+                } else {
+                    Token::Multiplicacion
+                }
+            }
+            '/' => Token::Division,
+            '%' => Token::Modulo,
+            '<' => {
+                if self.position + 1 < self.input.len() && self.input[self.position + 1] == '=' {
+                    self.position += 1;
+                    Token::MenorIgual
+                } else {
+                    Token::MenorQue
+                }
+            }
+            '>' => {
+                if self.position + 1 < self.input.len() && self.input[self.position + 1] == '=' {
+                    self.position += 1;
+                    Token::MayorIgual
+                } else {
+                    Token::MayorQue
+                }
+            }
+            '(' => Token::ParentesisAbre,
+            ')' => Token::ParentesisCierra,
+            '{' => Token::LlaveAbre,
+            '}' => Token::LlaveCierra,
+            '[' => Token::CorcheteAbre,
+            ']' => Token::CorcheteCierra,
             '-' => {
                 if self.position + 1 < self.input.len() && self.input[self.position + 1] == '>' {
                     self.position += 1; // Saltamos el '>'
@@ -33,19 +96,13 @@ impl Lexer {
                     Token::Resta
                 }
             }
-            '*' => Token::Multiplicacion,
-            '/' => Token::Division,
-            '<' => Token::MenorQue,
-            '>' => Token::MayorQue,
-            '(' => Token::ParentesisAbre,
-            ')' => Token::ParentesisCierra,
-            '{' => Token::LlaveAbre,
-            '}' => Token::LlaveCierra,
             '=' => {
-                // Miramos si el siguiente carácter también es '='
                 if self.position + 1 < self.input.len() && self.input[self.position + 1] == '=' {
                     self.position += 1; // Saltamos el segundo '='
                     Token::Igualdad
+                } else if self.position + 1 < self.input.len() && self.input[self.position + 1] == '>' {
+                    self.position += 1; // Saltamos el '>'
+                    Token::FlechaGrande
                 } else {
                     Token::Asignacion
                 }
@@ -66,36 +123,58 @@ impl Lexer {
                     Token::Ilegal
                 }
             }
+            '!' => {
+                if self.position + 1 < self.input.len() && self.input[self.position + 1] == '=' {
+                    self.position += 1;
+                    Token::Diferente
+                } else {
+                    Token::Ilegal
+                }
+            }
             '"' => return self.leer_cadena(),
-            ',' => Token::Coma,             // <-- NUEVO
-            '[' => Token::CorcheteAbre,     // <-- NUEVO
-            ']' => Token::CorcheteCierra,   // <-- NUEVO
             'a'..='z' | 'A'..='Z' | '_' => return self.leer_identificador_o_palabra_clave(),
             '0'..='9' => return self.leer_numero(),
             _ => Token::Ilegal,
         };
 
         self.position += 1;
+        self.avanzar_char();
         token
-
     }
 
-    // Lee texto entre comillas
-    // Lee texto entre comillas soportando secuencias de escape como \n y \"
+    fn saltar_espacios(&mut self) {
+        while self.position < self.input.len() {
+            let c = self.input[self.position];
+
+            // 🚀 Simplificado: is_whitespace() detecta espacios, tabs y saltos de línea
+            if c.is_whitespace() {
+                self.position += 1;
+            }
+            // Manejo de comentarios //
+            else if c == '/' && self.position + 1 < self.input.len() && self.input[self.position + 1] == '/' {
+                while self.position < self.input.len() && self.input[self.position] != '\n' {
+                    self.position += 1;
+                }
+            }
+            else {
+                break; // Si no es espacio ni comentario, salimos del bucle
+            }
+        }
+    }
+
     fn leer_cadena(&mut self) -> Token {
-        self.position += 1; // Saltamos la primera comilla '"'
+        self.position += 1; // Saltamos '"'
         let mut cadena = String::new();
 
         while self.position < self.input.len() && self.input[self.position] != '"' {
-            // Si detectamos una barra invertida '\', miramos la siguiente letra
             if self.input[self.position] == '\\' && self.position + 1 < self.input.len() {
-                self.position += 1; // Saltamos la barra '\'
+                self.position += 1;
                 match self.input[self.position] {
-                    'n' => cadena.push('\n'), // Salto de línea
-                    'r' => cadena.push('\r'), // Retorno de carro
-                    't' => cadena.push('\t'), // Tabulación
-                    '"' => cadena.push('"'),  // Comilla escapada
-                    '\\' => cadena.push('\\'), // Barra invertida
+                    'n' => cadena.push('\n'),
+                    'r' => cadena.push('\r'),
+                    't' => cadena.push('\t'),
+                    '"' => cadena.push('"'),
+                    '\\' => cadena.push('\\'),
                     _ => cadena.push(self.input[self.position]),
                 }
             } else {
@@ -105,33 +184,9 @@ impl Lexer {
         }
 
         if self.position < self.input.len() {
-            self.position += 1; // Saltamos la comilla final '"'
+            self.position += 1; // Saltamos '"' final
         }
-
         Token::Cadena(cadena)
-    }
-
-    // Salta espacios en blanco y también IGNORA los comentarios //
-    fn saltar_espacios(&mut self) {
-        while self.position < self.input.len() {
-            let c = self.input[self.position];
-
-            // 1. Si es un espacio o salto de línea, lo saltamos
-            if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-                self.position += 1;
-            }
-            // 2. Si es una barra '/', miramos si la siguiente también es '/'
-            else if c == '/' && self.position + 1 < self.input.len() && self.input[self.position + 1] == '/' {
-                // ¡Es un comentario! Avanzamos hasta encontrar el final de la línea (\n)
-                while self.position < self.input.len() && self.input[self.position] != '\n' {
-                    self.position += 1;
-                }
-            }
-            // 3. Si es código real, nos detenemos y dejamos que next_token haga su trabajo
-            else {
-                break;
-            }
-        }
     }
 
     fn leer_identificador_o_palabra_clave(&mut self) -> Token {
@@ -146,14 +201,19 @@ impl Lexer {
             "let" => Token::Let,
             "mut" => Token::Mut,
             "print" => Token::Print,
-            "true" => Token::True,   // <-- NUEVO
-            "false" => Token::False, // <-- NUEVO
-            "if" => Token::If,       // <-- NUEVO
+            "true" => Token::True,
+            "false" => Token::False,
+            "if" => Token::If,
             "else" => Token::Else,
             "while" => Token::While,
-            "fn" => Token::Fn,
+            "for" => Token::For,
+            "in" => Token::In,
+            "fn" | "fun" => Token::Fn,
+            "enum" => Token::Enum,
+            "struct" => Token::Struct,
+            "match" => Token::Match,
             "return" => Token::Return,
-            "import" => Token::Import, // <-- NUEVO: Reconoce "import"
+            "import" => Token::Import,
             "from" => Token::From,
             "break" => Token::Break,
             "int" | "float" | "str" | "bool" | "Arreglo" | "void" => Token::Tipo(palabra),
@@ -166,10 +226,7 @@ impl Lexer {
         while self.position < self.input.len() && self.input[self.position].is_ascii_digit() {
             self.position += 1;
         }
-
         let numero_str: String = self.input[inicio..self.position].iter().collect();
-        Token::Entero(numero_str.parse::<i64>().unwrap())
-
+        Token::Entero(numero_str.parse::<i64>().unwrap_or(0))
     }
-
 }

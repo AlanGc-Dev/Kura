@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use crate::token::Token;
+use crate::types::TipoKura;
 
 // Un programa completo en Kura es solo una lista de declaraciones
 #[derive(Debug, Clone)]
@@ -15,7 +16,7 @@ pub enum Declaracion {
     Let {
         es_mut: bool,
         nombre: String,
-        tipo: String,
+        tipo: Option<TipoKura>,
         valor: Expresion,
     },
     Print {
@@ -34,6 +35,11 @@ pub enum Declaracion {
         condicion: Expresion,
         cuerpo: Vec<Declaracion>,
     },
+    For {                      // <-- NUEVO: for elemento in iterable { ... }
+        variable: String,
+        iterable: Expresion,
+        cuerpo: Vec<Declaracion>,
+    },
     Funcion {                   // <-- NUEVO: Para crear 'fn atacar() { ... }'
         nombre: String,
         parametros: Vec<String>,
@@ -50,6 +56,39 @@ pub enum Declaracion {
         elementos: Vec<String>, // Guarda ["funcion1", "variable2"]
         archivo: String,        // Guarda "archivo.kr"
     },
+    Enum {                      // <-- NUEVO: Definición de enum
+        nombre: String,
+        variantes: Vec<VarianteEnum>,
+    },
+    Match {                     // <-- NUEVO: Pattern matching
+        valor: Expresion,
+        casos: Vec<CasoMatch>,
+    },
+}
+
+// Estructura para variantes de enum
+#[derive(Debug, Clone)]
+pub struct VarianteEnum {
+    pub nombre: String,
+    pub campos: Vec<String>, // Nombres de campos (ej: Ok(valor), Err(error))
+}
+
+// Estructura para casos de match
+#[derive(Debug, Clone)]
+pub struct CasoMatch {
+    pub patron: Pattern,
+    pub cuerpo: Vec<Declaracion>,
+}
+
+// Tipos de patrones para pattern matching
+#[derive(Debug, Clone)]
+pub enum Pattern {
+    Variante {
+        nombre: String,
+        bindings: Vec<String>, // variables que se vinculan (ej: Ok(v), Err(e))
+    },
+    Identificador(String),
+    Comodin, // _ para "cualquier cosa"
 }
 
 // Las expresiones son cosas que producen un valor (ej: 5, "hola", x + 2)
@@ -74,6 +113,10 @@ pub enum Expresion {
     Llamada {                   // <-- NUEVO
         nombre: String,
         argumentos: Vec<Expresion>,
+    },
+    ConstructorEnum {           // <-- NUEVO: Para Ok(valor), Err(error)
+        variante: String,
+        valores: Vec<Expresion>,
     },
     Diccionario(Vec<(String, Expresion)>),
 

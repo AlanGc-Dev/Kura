@@ -1,0 +1,6 @@
+let x = 5;
+print x;
+let s = "hola";
+print s;
+let b = true;
+print b;

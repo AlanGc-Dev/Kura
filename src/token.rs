@@ -9,7 +9,12 @@ pub enum Token {
     If,    // <-- NUEVO
     Else,
     While,
+    For,    // <-- NUEVO
+    In,     // <-- NUEVO
     Fn,      // <-- NUEVO
+    Enum,   // <-- NUEVO
+    Struct, // <-- NUEVO
+    Match,  // <-- NUEVO
     Return,
     Import,
     From,
@@ -32,10 +37,17 @@ pub enum Token {
     Resta,          // -
     Multiplicacion, // *
     Division,       // /
+    Modulo,         // %  <-- NUEVO
+    Potencia,       // ** <-- NUEVO
     Igualdad,       // ==  <-- NUEVO
+    Diferente,      // != <-- NUEVO
     MenorQue,       // <   <-- NUEVO
     MayorQue,       // >   <-- NUEVO
+    MenorIgual,     // <= <-- NUEVO
+    MayorIgual,     // >= <-- NUEVO
+    AsignacionCompuesta, // += <-- NUEVO
     Flecha,         // ->
+    FlechaGrande,   // => <-- NUEVO
 
     // Agrupación
     ParentesisAbre,
@@ -44,7 +56,8 @@ pub enum Token {
     LlaveCierra,
     CorcheteAbre,   // [
     CorcheteCierra, // ]
-    Coma,           // ,
+    Coma,   
+    Punto,// ,
 
     Ilegal,
     FinDeArchivo,
