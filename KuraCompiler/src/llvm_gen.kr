@@ -1,0 +1,55 @@
+fn compilar_bloque_llvm(ast) {
+    let mut codigo = "";
+    let mut i = 0;
+    let total = len(ast);
+    let mut contador_registros = 1;
+
+    while i < total {
+        let nodo = ast[i];
+
+        if nodo["tipo_nodo"] == "DeclaracionLet" {
+            let nombre = nodo["nombre"];
+            // Por ahora asumimos que el valor es un Entero directo
+            let valor = a_cadena(nodo["valor"]["valor"]); 
+            
+            // 1. Reservar memoria RAM (i64 = entero de 64 bits, como en Rust)
+            codigo = codigo + "  %" + nombre + " = alloca i64\n";
+            // 2. Guardar el valor en la memoria
+            codigo = codigo + "  store i64 " + valor + ", i64* %" + nombre + "\n";
+        }
+        else if nodo["tipo_nodo"] == "Print" {
+            // Asumimos que imprimimos una variable (Identificador)
+            let nombre_var = nodo["valor"]["valor"]; 
+            
+            // Creamos un registro temporal (ej: %1, %2)
+            let reg = a_cadena(contador_registros);
+            contador_registros = contador_registros + 1;
+            
+            // 3. Cargar el valor de la RAM al procesador
+            codigo = codigo + "  %" + reg + " = load i64, i64* %" + nombre_var + "\n";
+            // 4. Llamar a la función nativa del sistema operativo para imprimir
+            codigo = codigo + "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([5 x i8], [5 x i8]* @.formato_num, i32 0, i32 0), i64 %" + reg + ")\n";
+        }
+        i = i + 1;
+    }
+    return codigo;
+}
+
+fn compilar_a_llvm(ast) {
+    let mut ir = "; --- KURA LLVM IR GENERATOR ---\n\n";
+
+    // Inyectamos la función nativa 'printf' y el formato de texto "%lld"
+    ir = ir + "@.formato_num = private unnamed_addr constant [5 x i8] c\"%lld\\0A\\00\"\n";
+    ir = ir + "declare i32 @printf(i8*, ...)\n\n";
+
+    ir = ir + "define i32 @main() {\n";
+    ir = ir + "entry:\n";
+
+    // Compilamos el cuerpo del programa
+    ir = ir + compilar_bloque_llvm(ast);
+
+    ir = ir + "  ret i32 0\n";
+    ir = ir + "}\n";
+
+    return ir;
+}

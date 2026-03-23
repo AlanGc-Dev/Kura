@@ -1,0 +1,116 @@
+fn evaluar_expresion(nodo, entorno) {
+    if nodo["tipo_nodo"] == "Entero" { return nodo["valor"]; } 
+    else if nodo["tipo_nodo"] == "Cadena" { return nodo["valor"]; }
+    else if nodo["tipo_nodo"] == "Booleano" { return nodo["valor"]; }
+    else if nodo["tipo_nodo"] == "Identificador" {
+        return entorno[nodo["valor"]]; 
+    } 
+    else if nodo["tipo_nodo"] == "Arreglo" {
+        let mut arr_evaluado = [];
+        let mut i = 0;
+        let elems = nodo["elementos"];
+        let total = len(elems);
+        while i < total {
+            let val = evaluar_expresion(elems[i], entorno);
+            arr_evaluado = push(arr_evaluado, val);
+            i = i + 1;
+        }
+        return arr_evaluado;
+    }
+    else if nodo["tipo_nodo"] == "Arreglo" {
+        let mut arr_evaluado = [];
+        let mut i = 0;
+        let elems = nodo["elementos"];
+        let total = len(elems);
+        while i < total {
+            let val = evaluar_expresion(elems[i], entorno);
+            arr_evaluado = push(arr_evaluado, val);
+            i = i + 1;
+        }
+        return arr_evaluado;
+    }
+    else if nodo["tipo_nodo"] == "Operacion" {
+        let izq = evaluar_expresion(nodo["izquierda"], entorno);
+        let der = evaluar_expresion(nodo["derecha"], entorno);
+        
+        if nodo["operador"] == "+" { return izq + der; } 
+        else if nodo["operador"] == "-" { return izq - der; }
+        else if nodo["operador"] == "<" { return izq < der; }
+        else if nodo["operador"] == ">" { return izq > der; }
+        else if nodo["operador"] == "==" { return izq == der; }
+    }
+    else if nodo["tipo_nodo"] == "Llamada" {
+        let funcion = entorno[nodo["nombre"]];
+        let parametros = funcion["parametros"];
+        let argumentos = nodo["argumentos"];
+        
+        let mut entorno_local = entorno;
+        let mut k = 0;
+        let total_args = len(argumentos);
+        
+        while k < total_args {
+            let val_arg = evaluar_expresion(argumentos[k], entorno);
+            entorno_local = reemplazar(entorno_local, parametros[k], val_arg);
+            k = k + 1;
+        }
+
+        let memoria_salida = evaluar_bloque(funcion["cuerpo"], entorno_local);
+        return memoria_salida["__return__"];
+    }
+    return null;
+}
+
+fn evaluar_bloque(ast, entorno) {
+    let mut entorno_actual = entorno;
+    let mut i = 0;
+    let total_nodos = len(ast);
+
+    while i < total_nodos {
+        let nodo = ast[i];
+
+        if nodo["tipo_nodo"] == "DeclaracionLet" {
+            let valor = evaluar_expresion(nodo["valor"], entorno_actual);
+            entorno_actual = reemplazar(entorno_actual, nodo["nombre"], valor);
+        }
+        else if nodo["tipo_nodo"] == "Reasignacion" {
+            let valor = evaluar_expresion(nodo["valor"], entorno_actual);
+            entorno_actual = reemplazar(entorno_actual, nodo["nombre"], valor);
+        }
+        else if nodo["tipo_nodo"] == "Print" {
+            let valor = evaluar_expresion(nodo["valor"], entorno_actual);
+            print(valor);
+        }
+        else if nodo["tipo_nodo"] == "If" {
+            let condicion = evaluar_expresion(nodo["condicion"], entorno_actual);
+            if condicion { entorno_actual = evaluar_bloque(nodo["consecuencia"], entorno_actual); }
+        }
+        else if nodo["tipo_nodo"] == "While" {
+            let mut condicion = evaluar_expresion(nodo["condicion"], entorno_actual);
+            while condicion {
+                entorno_actual = evaluar_bloque(nodo["cuerpo"], entorno_actual);
+                condicion = evaluar_expresion(nodo["condicion"], entorno_actual);
+            }
+        }
+        else if nodo["tipo_nodo"] == "Funcion" {
+            entorno_actual = reemplazar(entorno_actual, nodo["nombre"], nodo);
+        }
+        else if nodo["tipo_nodo"] == "Return" {
+            let valor_retorno = evaluar_expresion(nodo["valor"], entorno_actual);
+            entorno_actual = reemplazar(entorno_actual, "__return__", valor_retorno);
+            break; 
+        }
+        else if nodo["tipo_nodo"] == "Llamada" {
+            evaluar_expresion(nodo, entorno_actual);
+        }
+        
+        i = i + 1;
+    }
+
+    return entorno_actual;
+}
+
+fn evaluar_ast(ast) {
+    let entorno_inicial = {}; 
+    let memoria_final = evaluar_bloque(ast, entorno_inicial);
+    return memoria_final;
+}

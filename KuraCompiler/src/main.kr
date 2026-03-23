@@ -1,0 +1,16 @@
+import { lexer, crear_token } from "lexer.kr";
+import { parsear_codigo, parsear_bloque, crear_nodo_let, crear_nodo_print, parsear_expresion, crear_nodo_entero, crear_nodo_operacion, crear_nodo_identificador, crear_nodo_cadena, crear_nodo_booleano, crear_nodo_reasignacion, crear_nodo_if, crear_nodo_while, crear_nodo_funcion, crear_nodo_return, crear_nodo_llamada } from "parser.kr";
+import { compilar_a_llvm } from "llvm_gen.kr";
+
+fn main() {
+    let codigo_fuente = "let mi_nivel = 9000; print(mi_nivel);";
+    let mis_tokens = lexer(codigo_fuente);
+    let mi_ast = parsear_codigo(mis_tokens);
+    
+    let codigo_llvm = compilar_a_llvm(mi_ast);
+    
+    print("Intentando guardar en: ./salida_final.ll");
+    escribir_archivo("./salida_final.ll", codigo_llvm);
+    print("Proceso terminado.");
+}
+main();
