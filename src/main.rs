@@ -11,7 +11,6 @@ mod types;
 
 use lexer::Lexer;
 use parser::Parser;
-use evaluator::{Entorno, evaluar_programa};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -39,6 +38,6 @@ fn main() {
     let mut parser = Parser::new(lexer);
     let programa = parser.parse_programa();
 
-    let mut memoria = Entorno::new();
-    evaluar_programa(programa, &mut memoria);
+    let entorno = evaluator::Entorno::new(); // <-- Ya no es mut
+    evaluator::evaluar_programa(programa, entorno); // <-- Ya no lleva el &mut
 }

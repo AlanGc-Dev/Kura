@@ -1,10 +1,19 @@
-fn sumar_estricto(a: Entero, b: Entero): Entero {
-    return a + b;
+struct Creador {
+    nombre: Cadena,
+    nivel: Entero
 }
 
-fn sumar_dinamico(a, b) {
-    return a + b;
-}
+let yo = Creador {
+    nombre: "Alan",
+    nivel: 99
+};
 
-print sumar_estricto(10, 5);
-print sumar_dinamico("Hola ", "Mundo");
+print yo;
+
+print "Subiendo de nivel a:";
+print yo.nombre;
+
+// ¡Esto no era posible antes! Modificar propiedades:
+yo.nivel = 100;
+
+print yo;

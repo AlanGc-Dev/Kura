@@ -1,9 +1,10 @@
-
-
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 use crate::ast::{Programa, Declaracion, Expresion, CasoMatch, Pattern, VarianteEnum};
 use crate::token::Token;
 use crate::types::TipoKura;
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ObjetoKura {
@@ -16,66 +17,99 @@ pub enum ObjetoKura {
         retorno: Option<TipoKura>,
         cuerpo: Vec<Declaracion>
     },
-    Retorno(Box<ObjetoKura>), // <-- PARA ATRAPAR EL RETURN
-    Variante {                  // <-- NUEVO: Para instancias de enum
+    Retorno(Box<ObjetoKura>),
+    Variante {
         nombre_enum: String,
         nombre_variante: String,
         valores: Vec<ObjetoKura>,
     },
     Nulo,
-    Diccionario(HashMap<String, ObjetoKura>), // <-- NUEVO
+    Diccionario(HashMap<String, ObjetoKura>),
     Break,
+    InstanciaStruct {
+        nombre: String,
+        campos: Rc<RefCell<HashMap<String, ObjetoKura>>>,
+    },
 }
 
-// Estructura para guardar definiciones de enum
 #[derive(Debug, Clone)]
 pub struct DefinicionEnum {
     pub nombre: String,
-    pub variantes: HashMap<String, usize>, // nombre_variante -> num_campos
+    pub variantes: HashMap<String, usize>,
 }
 
+#[derive(Debug, Clone)]
+pub struct DefinicionStruct {
+    pub nombre: String,
+    pub campos: HashMap<String, TipoKura>,
+}
+
+// --- EL NUEVO ENTORNO INTELIGENTE ---
 #[derive(Clone)]
 pub struct Entorno {
     pub variables: HashMap<String, ObjetoKura>,
-    pub enums: HashMap<String, DefinicionEnum>, // <-- NUEVO: Guardar definiciones de enum
+    pub enums: HashMap<String, DefinicionEnum>,
+    pub padre: Option<Rc<RefCell<Entorno>>>, // <--- El hilo hacia el scope superior
+    pub structs: HashMap<String, DefinicionStruct>,
 }
 
 impl Entorno {
-    pub fn new() -> Self {
-        Entorno { 
+    pub fn new() -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Entorno {
             variables: HashMap::new(),
             enums: HashMap::new(),
-        }
+            padre: None,
+            structs: Default::default(),
+        }))
     }
-    // Clona la memoria para usarla dentro de una función
-    pub fn extend(&self) -> Self {
-        Entorno { 
-            variables: self.variables.clone(),
-            enums: self.enums.clone(),
-        }
+
+    pub fn extend(padre: Rc<RefCell<Self>>) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Entorno {
+            variables: HashMap::new(),
+            enums: HashMap::new(),
+            padre: Some(padre), // Solo guardamos el puntero, cero copias!
+            structs: Default::default(),
+        }))
     }
+
     pub fn guardar(&mut self, nombre: String, valor: ObjetoKura) {
         self.variables.insert(nombre, valor);
     }
-    pub fn obtener(&self, nombre: &str) -> Option<ObjetoKura> {
-        self.variables.get(nombre).cloned()
-    }
-}
 
-pub fn evaluar_programa(programa: Programa, entorno: &mut Entorno) {
-    for declaracion in programa.declaraciones {
-        let res = evaluar_declaracion(declaracion, entorno);
-        if let ObjetoKura::Retorno(_) = res {
-            break; // Termina el programa si hay un return global
+    pub fn reasignar(&mut self, nombre: &str, valor: ObjetoKura) -> bool {
+        if self.variables.contains_key(nombre) {
+            self.variables.insert(nombre.to_string(), valor);
+            true
+        } else if let Some(padre) = &self.padre {
+            padre.borrow_mut().reasignar(nombre, valor)
+        } else {
+            false
+        }
+    }
+
+    pub fn obtener(&self, nombre: &str) -> Option<ObjetoKura> {
+        if let Some(valor) = self.variables.get(nombre) {
+            Some(valor.clone())
+        } else if let Some(padre) = &self.padre {
+            padre.borrow().obtener(nombre) // Busca hacia arriba
+        } else {
+            None
         }
     }
 }
 
-// Ahora evaluar_declaracion devuelve un ObjetoKura para poder atrapar los "returns"
-fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> ObjetoKura {
+// Nota: Ahora pasamos Rc<RefCell<Entorno>> en lugar de &mut Entorno
+pub fn evaluar_programa(programa: Programa, entorno: Rc<RefCell<Entorno>>) {
+    for declaracion in programa.declaraciones {
+        let res = evaluar_declaracion(declaracion, Rc::clone(&entorno));
+        if let ObjetoKura::Retorno(_) = res { break; }
+    }
+}
+
+fn evaluar_declaracion(declaracion: Declaracion, entorno: Rc<RefCell<Entorno>>) -> ObjetoKura {
     match declaracion {
         Declaracion::Let { nombre, tipo, valor, .. } => {
-            let valor_evaluado = evaluar_expresion(valor, entorno);
+            let valor_evaluado = evaluar_expresion(valor, Rc::clone(&entorno));
             if let Some(tipo_esperado) = tipo {
                 let tipo_real = TipoKura::de_objeto(&valor_evaluado);
                 if tipo_esperado != tipo_real {
@@ -83,27 +117,25 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
                     return ObjetoKura::Nulo;
                 }
             }
-            entorno.guardar(nombre, valor_evaluado);
+            entorno.borrow_mut().guardar(nombre, valor_evaluado);
             ObjetoKura::Nulo
         }
         Declaracion::Print { valor } => {
-            let valor_evaluado = evaluar_expresion(valor, entorno);
+            let valor_evaluado = evaluar_expresion(valor, Rc::clone(&entorno));
             imprimir_objeto(&valor_evaluado);
-            println!(); // Salto de línea al final
+            println!();
             ObjetoKura::Nulo
         }
         Declaracion::Reasignacion { nombre, valor } => {
-            let valor_evaluado = evaluar_expresion(valor, entorno);
-            if entorno.variables.contains_key(&nombre) {
-                entorno.guardar(nombre, valor_evaluado);
-            } else {
+            let valor_evaluado = evaluar_expresion(valor, Rc::clone(&entorno));
+            if !entorno.borrow_mut().reasignar(&nombre, valor_evaluado) {
                 println!("Error: La variable '{}' no ha sido declarada.", nombre);
             }
             ObjetoKura::Nulo
         }
         Declaracion::Break => ObjetoKura::Break,
         Declaracion::If { condicion, consecuencia, alternativa } => {
-            let valor_condicion = evaluar_expresion(condicion, entorno);
+            let valor_condicion = evaluar_expresion(condicion, Rc::clone(&entorno));
             let es_verdadero = match valor_condicion {
                 ObjetoKura::Booleano(b) => b,
                 ObjetoKura::Entero(n) => n != 0,
@@ -111,14 +143,15 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
             };
 
             if es_verdadero {
+                let entorno_if = Entorno::extend(Rc::clone(&entorno)); // Scope del IF
                 for decl in consecuencia {
-                    let res = evaluar_declaracion(decl, entorno);
-                    // Atrapamos Return O Break y lo burbujeamos
+                    let res = evaluar_declaracion(decl, Rc::clone(&entorno_if));
                     if matches!(res, ObjetoKura::Retorno(_) | ObjetoKura::Break) { return res; }
                 }
             } else if let Some(bloque_else) = alternativa {
+                let entorno_else = Entorno::extend(Rc::clone(&entorno));
                 for decl in bloque_else {
-                    let res = evaluar_declaracion(decl, entorno);
+                    let res = evaluar_declaracion(decl, Rc::clone(&entorno_else));
                     if matches!(res, ObjetoKura::Retorno(_) | ObjetoKura::Break) { return res; }
                 }
             }
@@ -126,7 +159,7 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
         }
         Declaracion::While { condicion, cuerpo } => {
             loop {
-                let valor_condicion = evaluar_expresion(condicion.clone(), entorno);
+                let valor_condicion = evaluar_expresion(condicion.clone(), Rc::clone(&entorno));
                 let es_verdadero = match valor_condicion {
                     ObjetoKura::Booleano(b) => b,
                     ObjetoKura::Entero(n) => n != 0,
@@ -135,26 +168,29 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
                 if !es_verdadero { break; }
 
                 let mut romper_ciclo = false;
+                let entorno_while = Entorno::extend(Rc::clone(&entorno));
                 for decl in cuerpo.clone() {
-                    let res = evaluar_declaracion(decl, entorno);
+                    let res = evaluar_declaracion(decl, Rc::clone(&entorno_while));
                     if matches!(res, ObjetoKura::Retorno(_)) { return res; }
                     if matches!(res, ObjetoKura::Break) {
                         romper_ciclo = true;
-                        break; // Rompe el for
+                        break;
                     }
                 }
-                if romper_ciclo { break; } // Rompe el loop principal de Rust
+                if romper_ciclo { break; }
             }
             ObjetoKura::Nulo
         }
         Declaracion::For { variable, iterable, cuerpo } => {
-            let iterable_evaluado = evaluar_expresion(iterable, entorno);
+            let iterable_evaluado = evaluar_expresion(iterable, Rc::clone(&entorno));
             if let ObjetoKura::Arreglo(arr) = iterable_evaluado {
                 for elemento in arr {
-                    entorno.guardar(variable.clone(), elemento);
+                    let entorno_for = Entorno::extend(Rc::clone(&entorno));
+                    entorno_for.borrow_mut().guardar(variable.clone(), elemento);
+
                     let mut romper_ciclo = false;
                     for decl in cuerpo.clone() {
-                        let res = evaluar_declaracion(decl, entorno);
+                        let res = evaluar_declaracion(decl, Rc::clone(&entorno_for));
                         if matches!(res, ObjetoKura::Retorno(_)) { return res; }
                         if matches!(res, ObjetoKura::Break) {
                             romper_ciclo = true;
@@ -166,48 +202,39 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
             }
             ObjetoKura::Nulo
         }
-
-        // --- GOLPE FINAL: LÓGICA DE FUNCIONES ---
         Declaracion::Funcion { nombre, parametros, retorno, cuerpo } => {
             let funcion = ObjetoKura::Funcion { parametros, retorno, cuerpo };
-            entorno.guardar(nombre, funcion);
+            entorno.borrow_mut().guardar(nombre, funcion);
             ObjetoKura::Nulo
         }
         Declaracion::Return { valor } => {
-            let valor_evaluado = evaluar_expresion(valor, entorno);
+            let valor_evaluado = evaluar_expresion(valor, Rc::clone(&entorno));
             ObjetoKura::Retorno(Box::new(valor_evaluado))
         }
         Declaracion::LlamadaSuelta { nombre, argumentos } => {
-            evaluar_expresion(Expresion::Llamada { nombre, argumentos }, entorno);
+            evaluar_expresion(Expresion::Llamada { nombre, argumentos }, Rc::clone(&entorno));
             ObjetoKura::Nulo
         }
         Declaracion::Enum { nombre, variantes } => {
-            // Crear definición del enum
             let mut vars_map = HashMap::new();
             for VarianteEnum { nombre: var_name, campos } in variantes {
                 vars_map.insert(var_name, campos.len());
             }
-            let def = DefinicionEnum {
-                nombre: nombre.clone(),
-                variantes: vars_map,
-            };
-            entorno.enums.insert(nombre, def);
+            let def = DefinicionEnum { nombre: nombre.clone(), variantes: vars_map };
+            entorno.borrow_mut().enums.insert(nombre, def);
             ObjetoKura::Nulo
         }
         Declaracion::Match { valor, casos } => {
-            let valor_evaluado = evaluar_expresion(valor, entorno);
-            
+            let valor_evaluado = evaluar_expresion(valor, Rc::clone(&entorno));
+
             for CasoMatch { patron, cuerpo } in casos {
-                if patron_coincide(&patron, &valor_evaluado, entorno) {
-                    // Vincular variables del patrón
-                    vincular_patron(&patron, &valor_evaluado, entorno);
-                    
-                    // Ejecutar el cuerpo
+                if patron_coincide(&patron, &valor_evaluado) {
+                    let entorno_match = Entorno::extend(Rc::clone(&entorno));
+                    vincular_patron(&patron, &valor_evaluado, Rc::clone(&entorno_match));
+
                     for decl in cuerpo {
-                        let res = evaluar_declaracion(decl, entorno);
-                        if matches!(res, ObjetoKura::Retorno(_) | ObjetoKura::Break) {
-                            return res;
-                        }
+                        let res = evaluar_declaracion(decl, Rc::clone(&entorno_match));
+                        if matches!(res, ObjetoKura::Retorno(_) | ObjetoKura::Break) { return res; }
                     }
                     break;
                 }
@@ -215,7 +242,6 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
             ObjetoKura::Nulo
         }
         Declaracion::Importar { elementos, archivo } => {
-            // 1. Intentamos leer el archivo que nos pidieron
             let contenido = match std::fs::read_to_string(&archivo) {
                 Ok(c) => c,
                 Err(_) => {
@@ -224,75 +250,80 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: &mut Entorno) -> Objet
                 }
             };
 
-            // 2. Creamos un mini-compilador para leer ese archivo
             let lexer = crate::lexer::Lexer::new(&contenido);
             let mut parser = crate::parser::Parser::new(lexer);
             let programa_modulo = parser.parse_programa();
 
-            // 3. Creamos una "burbuja" de memoria temporal y ejecutamos el modulo ahi
-            let mut entorno_modulo = Entorno::new();
-            evaluar_programa(programa_modulo, &mut entorno_modulo);
+            let entorno_modulo = Entorno::new();
+            evaluar_programa(programa_modulo, Rc::clone(&entorno_modulo));
 
-            // 4. Extraemos SOLO lo que el usuario pidio y lo pasamos al entorno principal
             for nombre in elementos {
-                if let Some(valor) = entorno_modulo.obtener(&nombre) {
-                    entorno.guardar(nombre, valor);
+                if let Some(valor) = entorno_modulo.borrow().obtener(&nombre) {
+                    entorno.borrow_mut().guardar(nombre, valor);
                 } else {
                     println!("Error Kura: '{}' no fue encontrado dentro de '{}'", nombre, archivo);
                 }
             }
-
             ObjetoKura::Nulo
         },
+        Declaracion::Struct { nombre, campos } => {
+            let mut campos_map = HashMap::new();
+            for (c_nom, c_tipo) in campos {
+                campos_map.insert(c_nom, c_tipo);
+            }
+            let def = DefinicionStruct { nombre: nombre.clone(), campos: campos_map };
+            entorno.borrow_mut().structs.insert(nombre, def);
+            ObjetoKura::Nulo
+        }
+        Declaracion::ReasignacionPropiedad { objeto, propiedad, valor } => {
+            let valor_evaluado = evaluar_expresion(valor, Rc::clone(&entorno));
+            if let Some(ObjetoKura::InstanciaStruct { campos, .. }) = entorno.borrow().obtener(&objeto) {
+                campos.borrow_mut().insert(propiedad, valor_evaluado);
+            } else {
+                println!("Error: La variable '{}' no es un Struct o no existe", objeto);
+            }
+            ObjetoKura::Nulo
+        }
     }
 }
 
-// Nota: Ahora recibe '&mut Entorno' porque evaluar una llamada modifica la memoria temporalmente
-fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura {
+fn evaluar_expresion(expresion: Expresion, entorno: Rc<RefCell<Entorno>>) -> ObjetoKura {
     match expresion {
         Expresion::Entero(n) => ObjetoKura::Entero(n),
         Expresion::Booleano(b) => ObjetoKura::Booleano(b),
         Expresion::Cadena(texto) => ObjetoKura::Cadena(texto),
-        Expresion::Identificador(nombre) => entorno.obtener(&nombre).unwrap_or(ObjetoKura::Nulo),
+        Expresion::Identificador(nombre) => entorno.borrow().obtener(&nombre).unwrap_or(ObjetoKura::Nulo),
         Expresion::Arreglo(elementos) => {
             let mut evaluados = Vec::new();
             for el in elementos {
-                evaluados.push(evaluar_expresion(el, entorno));
+                evaluados.push(evaluar_expresion(el, Rc::clone(&entorno)));
             }
             ObjetoKura::Arreglo(evaluados)
         }
         Expresion::Indice { estructura, indice } => {
-            let estructura_evaluada = evaluar_expresion(*estructura, entorno);
-            let indice_evaluado = evaluar_expresion(*indice, entorno);
+            let estructura_evaluada = evaluar_expresion(*estructura, Rc::clone(&entorno));
+            let indice_evaluado = evaluar_expresion(*indice, Rc::clone(&entorno));
 
-            // Si es un Arreglo...
             if let (ObjetoKura::Arreglo(arr), ObjetoKura::Entero(i)) = (&estructura_evaluada, &indice_evaluado) {
                 if *i >= 0 && (*i as usize) < arr.len() {
                     return arr[*i as usize].clone();
                 }
             }
-            // ¡NUEVO!: Si es un Diccionario...
             if let (ObjetoKura::Diccionario(dic), ObjetoKura::Cadena(clave)) = (&estructura_evaluada, &indice_evaluado) {
                 return dic.get(clave).cloned().unwrap_or(ObjetoKura::Nulo);
             }
             ObjetoKura::Nulo
         }
         Expresion::Operacion { izquierda, operador, derecha } => {
-            let izq_val = evaluar_expresion(*izquierda, entorno);
-            let der_val = evaluar_expresion(*derecha, entorno);
+            let izq_val = evaluar_expresion(*izquierda, Rc::clone(&entorno));
+            let der_val = evaluar_expresion(*derecha, Rc::clone(&entorno));
 
-            // ¡NUEVO!: Operadores lógicos
             if operador == Token::And {
-                if let (ObjetoKura::Booleano(b1), ObjetoKura::Booleano(b2)) = (&izq_val, &der_val) {
-                    return ObjetoKura::Booleano(*b1 && *b2);
-                }
+                if let (ObjetoKura::Booleano(b1), ObjetoKura::Booleano(b2)) = (&izq_val, &der_val) { return ObjetoKura::Booleano(*b1 && *b2); }
             }
             if operador == Token::Or {
-                if let (ObjetoKura::Booleano(b1), ObjetoKura::Booleano(b2)) = (&izq_val, &der_val) {
-                    return ObjetoKura::Booleano(*b1 || *b2);
-                }
+                if let (ObjetoKura::Booleano(b1), ObjetoKura::Booleano(b2)) = (&izq_val, &der_val) { return ObjetoKura::Booleano(*b1 || *b2); }
             }
-            // Si ambos son números
             if let (ObjetoKura::Entero(i), ObjetoKura::Entero(d)) = (&izq_val, &der_val) {
                 return match operador {
                     Token::Suma => ObjetoKura::Entero(i + d),
@@ -310,35 +341,47 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                     _ => ObjetoKura::Nulo,
                 };
             }
-
-            // Si ambos son textos (Strings)
             if let (ObjetoKura::Cadena(i), ObjetoKura::Cadena(d)) = (&izq_val, &der_val) {
                 return match operador {
                     Token::Igualdad => ObjetoKura::Booleano(i == d),
                     Token::Diferente => ObjetoKura::Booleano(i != d),
-                    Token::Suma => ObjetoKura::Cadena(format!("{}{}", i, d)), // ¡Concatena textos!
+                    Token::Suma => ObjetoKura::Cadena(format!("{}{}", i, d)),
                     _ => ObjetoKura::Nulo,
                 };
             }
-
+            ObjetoKura::Nulo
+        }
+        Expresion::InstanciaStruct { nombre, campos } => {
+            let mut campos_map = HashMap::new();
+            for (c_nom, c_expr) in campos {
+                let val = evaluar_expresion(c_expr, Rc::clone(&entorno));
+                campos_map.insert(c_nom, val);
+            }
+            ObjetoKura::InstanciaStruct {
+                nombre,
+                campos: Rc::new(RefCell::new(campos_map)),
+            }
+        }
+        Expresion::AccesoPropiedad { objeto, propiedad } => {
+            let obj_eval = evaluar_expresion(*objeto, Rc::clone(&entorno));
+            if let ObjetoKura::InstanciaStruct { campos, .. } = obj_eval {
+                return campos.borrow().get(&propiedad).cloned().unwrap_or(ObjetoKura::Nulo);
+            }
             ObjetoKura::Nulo
         }
         Expresion::Diccionario(pares) => {
             let mut mapa = HashMap::new();
             for (clave, valor_expr) in pares {
-                let valor_evaluado = evaluar_expresion(valor_expr, entorno);
+                let valor_evaluado = evaluar_expresion(valor_expr, Rc::clone(&entorno));
                 mapa.insert(clave, valor_evaluado);
             }
             ObjetoKura::Diccionario(mapa)
         }
-        // --- GOLPE FINAL: EJECUTAR LA LLAMADA A FUNCIÓN ---
         Expresion::Llamada { nombre, argumentos } => {
 
-            // 1. FUNCIONES NATIVAS (Pre-instaladas en Kura)
             if nombre == "len" && argumentos.len() == 1 {
-                let arg_eval = evaluar_expresion(argumentos[0].clone(), entorno);
+                let arg_eval = evaluar_expresion(argumentos[0].clone(), Rc::clone(&entorno));
                 match arg_eval {
-                    // ¡NUEVO!: chars().count() cuenta letras reales, no bytes.
                     ObjetoKura::Cadena(s) => return ObjetoKura::Entero(s.chars().count() as i64),
                     ObjetoKura::Arreglo(arr) => return ObjetoKura::Entero(arr.len() as i64),
                     _ => {
@@ -348,193 +391,33 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                 }
             }
 
-            // NUEVA FUNCIÓN: Convierte "50" (Texto) a 50 (Número)
-            if nombre == "a_numero" && argumentos.len() == 1 {
-                let arg_eval = evaluar_expresion(argumentos[0].clone(), entorno);
-                if let ObjetoKura::Cadena(s) = arg_eval {
-                    if let Ok(num) = s.parse::<i64>() {
-                        return ObjetoKura::Entero(num);
-                    }
-                }
-                return ObjetoKura::Entero(0); // Si falla, devuelve 0
-            }
-
-            // NUEVA FUNCIÓN: Convierte 50 (Número) a "50" (Texto)
-            if nombre == "a_texto" && argumentos.len() == 1 {
-                let arg_eval = evaluar_expresion(argumentos[0].clone(), entorno);
-                match arg_eval {
-                    ObjetoKura::Entero(n) => return ObjetoKura::Cadena(n.to_string()),
-                    ObjetoKura::Booleano(b) => return ObjetoKura::Cadena(b.to_string()),
-                    ObjetoKura::Cadena(c) => return ObjetoKura::Cadena(c),
-                    _ => return ObjetoKura::Cadena("".to_string()),
-                }
-            }
-
-            if nombre == "es_letra" && argumentos.len() == 1 {
-                if let ObjetoKura::Cadena(s) = evaluar_expresion(argumentos[0].clone(), entorno) {
-                    if let Some(c) = s.chars().next() {
-                        return ObjetoKura::Booleano(c.is_alphabetic() || c == '_');
-                    }
-                }
-                return ObjetoKura::Booleano(false);
-            }
-
-            if nombre == "es_numero" && argumentos.len() == 1 {
-                if let ObjetoKura::Cadena(s) = evaluar_expresion(argumentos[0].clone(), entorno) {
-                    if let Some(c) = s.chars().next() {
-                        return ObjetoKura::Booleano(c.is_numeric());
-                    }
-                }
-                return ObjetoKura::Booleano(false);
-            }
-
-            if nombre == "char_at" && argumentos.len() == 2 {
-                let texto_eval = evaluar_expresion(argumentos[0].clone(), entorno);
-                let indice_eval = evaluar_expresion(argumentos[1].clone(), entorno);
-
-                if let (ObjetoKura::Cadena(s), ObjetoKura::Entero(i)) = (texto_eval, indice_eval) {
-                    // ¡NUEVO!: Validamos con seguridad sin usar unwrap() que pueda causar panic
-                    if i >= 0 && (i as usize) < s.chars().count() {
-                        if let Some(c) = s.chars().nth(i as usize) {
-                            return ObjetoKura::Cadena(c.to_string());
-                        }
-                    }
-                    return ObjetoKura::Cadena("".to_string()); // Índice fuera de rango seguro
-                } else {
-                    println!("Error: 'char_at' espera (cadena, entero).");
-                    return ObjetoKura::Nulo;
-                }
-            }
-
-            // NUEVA FUNCIÓN: Modifica un elemento específico de un arreglo
-            if nombre == "reemplazar" && argumentos.len() == 3 {
-                let arr_eval = evaluar_expresion(argumentos[0].clone(), entorno);
-                let indice_eval = evaluar_expresion(argumentos[1].clone(), entorno);
-                let valor_eval = evaluar_expresion(argumentos[2].clone(), entorno);
-
-                if let (ObjetoKura::Arreglo(mut arr), ObjetoKura::Entero(i)) = (arr_eval.clone(), indice_eval.clone()) {
-                    // Verificamos que el índice exista en el arreglo
-                    if i >= 0 && (i as usize) < arr.len() {
-                        arr[i as usize] = valor_eval; // ¡Sobrescribimos el valor!
-                        return ObjetoKura::Arreglo(arr); // Devolvemos el arreglo actualizado
-                    } else {
-                        println!("Error Kura: Indice {} fuera de limites en 'reemplazar'", i);
-                        return ObjetoKura::Nulo;
-                    }
-                }else if let (ObjetoKura::Diccionario(mut dic), ObjetoKura::Cadena(clave)) = (arr_eval, indice_eval) {
-                    dic.insert(clave, valor_eval);
-                    return ObjetoKura::Diccionario(dic);
-                } else {
-                    println!("Error Kura: 'reemplazar' espera (Arreglo, Entero, Valor)");
-                    return ObjetoKura::Nulo;
-                }
-            }
-
             if nombre == "push" && argumentos.len() == 2 {
-                let arr_eval = evaluar_expresion(argumentos[0].clone(), entorno);
-                let item_eval = evaluar_expresion(argumentos[1].clone(), entorno);
+                // AQUÍ HABRÁ OTRO REFACTOR LUEGO, POR AHORA LO DEJAMOS FUNCIONAL
+                let arr_eval = evaluar_expresion(argumentos[0].clone(), Rc::clone(&entorno));
+                let item_eval = evaluar_expresion(argumentos[1].clone(), Rc::clone(&entorno));
                 if let ObjetoKura::Arreglo(mut arr) = arr_eval {
                     arr.push(item_eval);
-                    return ObjetoKura::Arreglo(arr); // Devuelve el nuevo arreglo con el elemento adentro
+                    return ObjetoKura::Arreglo(arr);
                 } else {
                     println!("Error: 'push' espera (arreglo, elemento).");
                     return ObjetoKura::Nulo;
                 }
             }
 
-            if nombre == "pop" && argumentos.len() == 1 {
-                let arr_eval = evaluar_expresion(argumentos[0].clone(), entorno);
-                if let ObjetoKura::Arreglo(mut arr) = arr_eval {
-                    if let Some(elem) = arr.pop() {
-                        return elem; // Devuelve el elemento removido
-                    } else {
-                        println!("Error: 'pop' en arreglo vacío.");
-                        return ObjetoKura::Nulo;
-                    }
-                } else {
-                    println!("Error: 'pop' espera un arreglo.");
-                    return ObjetoKura::Nulo;
-                }
-            }
+            // BUSCAMOS EN EL ENTORNO
+            let funcion = entorno.borrow().obtener(&nombre);
 
-            if nombre == "sort" && argumentos.len() == 1 {
-                let arr_eval = evaluar_expresion(argumentos[0].clone(), entorno);
-                if let ObjetoKura::Arreglo(arr) = arr_eval {
-                    // Ordenar solo si todos son números
-                    let mut nums = Vec::new();
-                    for elem in &arr {
-                        if let ObjetoKura::Entero(n) = elem {
-                            nums.push(*n);
-                        } else {
-                            println!("Error: 'sort' solo funciona con arreglos de números.");
-                            return ObjetoKura::Nulo;
-                        }
-                    }
-                    nums.sort();
-                    let sorted = nums.into_iter().map(ObjetoKura::Entero).collect();
-                    return ObjetoKura::Arreglo(sorted);
-                } else {
-                    println!("Error: 'sort' espera un arreglo.");
-                    return ObjetoKura::Nulo;
-                }
-            }
-
-            // ¡NUEVO!: Convertir números y booleanos a texto
-            if nombre == "a_cadena" && argumentos.len() == 1 {
-                let arg_eval = evaluar_expresion(argumentos[0].clone(), entorno);
-                match arg_eval {
-                    ObjetoKura::Entero(n) => return ObjetoKura::Cadena(n.to_string()),
-                    ObjetoKura::Booleano(b) => return ObjetoKura::Cadena(b.to_string()),
-                    ObjetoKura::Cadena(c) => return ObjetoKura::Cadena(c),
-                    _ => return ObjetoKura::Cadena("null".to_string()),
-                }
-            }
-
-            // ¡NUEVO!: Escribir archivos nativos en el disco duro
-            if nombre == "escribir_archivo" && argumentos.len() == 2 {
-                let ruta_eval = evaluar_expresion(argumentos[0].clone(), entorno);
-                let contenido_eval = evaluar_expresion(argumentos[1].clone(), entorno);
-
-                if let (ObjetoKura::Cadena(ruta), ObjetoKura::Cadena(contenido)) = (ruta_eval, contenido_eval) {
-                    // --- AÑADE ESTA LÍNEA DE AQUÍ ABAJO ---
-                    println!(">>> RUST: Guardando {} bytes en {}", contenido.len(), ruta);
-
-                    if std::fs::write(&ruta, contenido).is_ok() {
-                        return ObjetoKura::Booleano(true);
-                    }
-                }
-                return ObjetoKura::Nulo;
-            }
-
-            // 1.5 CONSTRUCTORES DE ENUM (Ok(valor), Err(error), etc)
-            // Búscar si nombre es un constructor conocido
-            // Primero verificar si existe el constructor
-            if let Some(def_enum) = entorno.enums.iter().find(|(_, e)| e.variantes.contains_key(&nombre)).map(|(_, e)| e.clone()) {
-                let mut valores = Vec::new();
-                for arg_expr in argumentos {
-                    valores.push(evaluar_expresion(arg_expr, entorno));
-                }
-                return ObjetoKura::Variante {
-                    nombre_enum: def_enum.nombre.clone(),
-                    nombre_variante: nombre.clone(),
-                    valores,
-                };
-            }
-
-            // 2. FUNCIONES DEL USUARIO
-            let funcion = entorno.obtener(&nombre);
             if let Some(ObjetoKura::Funcion { parametros, retorno, cuerpo }) = funcion {
-
                 if argumentos.len() != parametros.len() {
                     println!("Error Kura: La funcion '{}' espera {} argumentos, recibio {}", nombre, parametros.len(), argumentos.len());
                     return ObjetoKura::Nulo;
                 }
 
-                let mut entorno_local = entorno.extend();
-                for (i, arg_expr) in argumentos.into_iter().enumerate() {
-                    let arg_evaluado = evaluar_expresion(arg_expr, entorno);
+                let entorno_local = Entorno::extend(Rc::clone(&entorno));
 
-                    // Validar tipo del parámetro opcionalmente
+                for (i, arg_expr) in argumentos.into_iter().enumerate() {
+                    let arg_evaluado = evaluar_expresion(arg_expr, Rc::clone(&entorno));
+
                     if let Some(tipo_esperado) = &parametros[i].1 {
                         let tipo_real = TipoKura::de_objeto(&arg_evaluado);
                         if *tipo_esperado != tipo_real && *tipo_esperado != TipoKura::Desconocido {
@@ -543,19 +426,18 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                         }
                     }
 
-                    entorno_local.guardar(parametros[i].0.clone(), arg_evaluado);
+                    entorno_local.borrow_mut().guardar(parametros[i].0.clone(), arg_evaluado);
                 }
 
                 let mut valor_retornado = ObjetoKura::Nulo;
                 for decl in cuerpo {
-                    let res = evaluar_declaracion(decl, &mut entorno_local);
+                    let res = evaluar_declaracion(decl, Rc::clone(&entorno_local));
                     if let ObjetoKura::Retorno(valor) = res {
                         valor_retornado = *valor;
                         break;
                     }
                 }
 
-                // Validar retorno opcionalmente
                 if let Some(tipo_ret) = retorno {
                     let tipo_real_ret = TipoKura::de_objeto(&valor_retornado);
                     if tipo_ret != tipo_real_ret && tipo_ret != TipoKura::Desconocido {
@@ -564,19 +446,16 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                 }
 
                 return valor_retornado;
-            } else {
-                println!("Error Kura: La funcion '{}' no existe. ¿Olvidaste el import?", nombre);
             }
             ObjetoKura::Nulo
         }
         Expresion::ConstructorEnum { variante, valores } => {
-            // Los constructores de enum se manejan como llamadas normales
             let mut valores_evaluados = Vec::new();
             for val in valores {
-                valores_evaluados.push(evaluar_expresion(val, entorno));
+                valores_evaluados.push(evaluar_expresion(val, Rc::clone(&entorno)));
             }
-            // Buscar si es un constructor de enum válido
-            for (_, def_enum) in &entorno.enums {
+            let def_enums = entorno.borrow().enums.clone();
+            for (_, def_enum) in &def_enums {
                 if def_enum.variantes.contains_key(&variante) {
                     return ObjetoKura::Variante {
                         nombre_enum: def_enum.nombre.clone(),
@@ -585,38 +464,33 @@ fn evaluar_expresion(expresion: Expresion, entorno: &mut Entorno) -> ObjetoKura 
                     };
                 }
             }
-            // Si no lo encuentra, error
-            println!("Error: Variante de enum '{}' no encontrada", variante);
             ObjetoKura::Nulo
         }
     }
 }
 
-// Métodos auxiliares para pattern matching
-fn patron_coincide(patron: &Pattern, valor: &ObjetoKura, _entorno: &Entorno) -> bool {
+fn patron_coincide(patron: &Pattern, valor: &ObjetoKura) -> bool {
     match patron {
         Pattern::Comodin => true,
         Pattern::Identificador(_) => true,
         Pattern::Variante { nombre, bindings } => {
             if let ObjetoKura::Variante { nombre_variante, valores, .. } = valor {
                 nombre == nombre_variante && valores.len() == bindings.len()
-            } else {
-                false
-            }
+            } else { false }
         }
     }
 }
 
-fn vincular_patron(patron: &Pattern, valor: &ObjetoKura, entorno: &mut Entorno) {
+fn vincular_patron(patron: &Pattern, valor: &ObjetoKura, entorno: Rc<RefCell<Entorno>>) {
     match patron {
         Pattern::Identificador(nombre) => {
-            entorno.guardar(nombre.clone(), valor.clone());
+            entorno.borrow_mut().guardar(nombre.clone(), valor.clone());
         }
         Pattern::Variante { bindings, .. } => {
             if let ObjetoKura::Variante { valores, .. } = valor {
                 for (i, binding) in bindings.iter().enumerate() {
                     if i < valores.len() {
-                        entorno.guardar(binding.clone(), valores[i].clone());
+                        entorno.borrow_mut().guardar(binding.clone(), valores[i].clone());
                     }
                 }
             }
@@ -625,7 +499,6 @@ fn vincular_patron(patron: &Pattern, valor: &ObjetoKura, entorno: &mut Entorno) 
     }
 }
 
-// Nueva función para imprimir objetos anidados infinitamente
 pub fn imprimir_objeto(obj: &ObjetoKura) {
     match obj {
         ObjetoKura::Entero(n) => print!("{}", n),
@@ -648,6 +521,19 @@ pub fn imprimir_objeto(obj: &ObjetoKura) {
                 if i < valores.len() - 1 { print!(", "); }
             }
             print!(")");
+        }
+        ObjetoKura::InstanciaStruct { nombre, campos } => {
+            print!("{} {{ ", nombre);
+            let mapa = campos.borrow();
+            let mut count = 0;
+            let len = mapa.len();
+            for (k, v) in mapa.iter() {
+                print!("{}: ", k);
+                imprimir_objeto(v);
+                count += 1;
+                if count < len { print!(", "); }
+            }
+            print!(" }}");
         }
         ObjetoKura::Retorno(val) => imprimir_objeto(val),
         ObjetoKura::Break => print!("break"),

@@ -65,6 +65,15 @@ pub enum Declaracion {
         valor: Expresion,
         casos: Vec<CasoMatch>,
     },
+    Struct {
+        nombre: String,
+        campos: Vec<(String, TipoKura)>,
+    },
+    ReasignacionPropiedad {
+        objeto: String,
+        propiedad: String,
+        valor: Expresion,
+    },
 }
 
 // Estructura para variantes de enum
@@ -120,5 +129,13 @@ pub enum Expresion {
         valores: Vec<Expresion>,
     },
     Diccionario(Vec<(String, Expresion)>),
+    InstanciaStruct {
+        nombre: String,
+        campos: Vec<(String, Expresion)>,
+    },
+    AccesoPropiedad {
+        objeto: Box<Expresion>,
+        propiedad: String,
+    },
 
 }

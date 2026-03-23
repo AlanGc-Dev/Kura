@@ -76,6 +76,7 @@ impl Parser {
             Token::Fn => self.parse_funcion(),
             Token::Break => self.parse_break(),
             Token::Enum => self.parse_enum(),
+            Token::Struct => self.parse_struct(),
             Token::Match => self.parse_match(),
             Token::Import => self.parse_declaracion_import(),// <-- LEEMOS FUNCIONES
             Token::Return => self.parse_return(),    // <-- LEEMOS RETORNOS
@@ -86,6 +87,7 @@ impl Parser {
                     Token::ParentesisAbre => self.parse_llamada_suelta(),
                     // 🚀 ¡NUEVO!: Soporte para reasignar diccionarios/arreglos
                     Token::CorcheteAbre => self.parse_reasignacion_indice(),
+                    Token::Punto => self.parse_reasignacion_propiedad(),
                     _ => {
                         println!("Error Parser [Instruccion]: Variable suelta o palabra no reconocida: {:?} {:?}", self.token_actual, self.token_siguiente);
                         self.avanzar();
@@ -436,6 +438,64 @@ impl Parser {
     // --- NUEVO: PARSEAR FUNCIONES (MODO SUPERVIVENCIA Y ERROR RECOVERY) ---
     fn parse_funcion(&mut self) -> Option<Declaracion> {
         self.avanzar(); // pasamos 'fn'
+        let mut izquierda = match &self.token_actual {
+            Token::Entero(n) => { let e = Expresion::Entero(*n); self.avanzar(); e },
+            Token::Cadena(t) => { let e = Expresion::Cadena(t.clone()); self.avanzar(); e },
+            Token::True => { self.avanzar(); Expresion::Booleano(true) },
+            Token::False => { self.avanzar(); Expresion::Booleano(false) },
+            Token::LlaveAbre => self.parse_diccionario()?,
+            Token::CorcheteAbre => self.parse_arreglo()?,
+            Token::Identificador(nom) => {
+                let id = nom.clone();
+                // ¿Es el inicio de un 'Persona { ... }'?
+                if self.token_siguiente == Token::LlaveAbre {
+                    self.avanzar(); // pasamos el Identificador
+                    self.parse_instancia_struct(id)?
+                } else {
+                    self.avanzar();
+                    Expresion::Identificador(id)
+                }
+            },
+            _ => return None,
+        };
+
+        // --- BUCLE PARA DETECTAR . [ ( ---
+        while self.token_actual == Token::CorcheteAbre || self.token_actual == Token::ParentesisAbre || self.token_actual == Token::Punto {
+            if self.token_actual == Token::CorcheteAbre {
+                self.avanzar();
+                let indice = self.parse_expresion()?;
+                if self.token_actual != Token::CorcheteCierra { return None; }
+                self.avanzar();
+                izquierda = Expresion::Indice { estructura: Box::new(izquierda), indice: Box::new(indice) };
+            }
+            else if self.token_actual == Token::ParentesisAbre {
+                self.avanzar();
+                let mut argumentos = Vec::new();
+                if self.token_actual != Token::ParentesisCierra {
+                    if let Some(arg) = self.parse_expresion() { argumentos.push(arg); }
+                    while self.token_actual == Token::Coma {
+                        self.avanzar();
+                        if let Some(arg) = self.parse_expresion() { argumentos.push(arg); }
+                    }
+                }
+                if self.token_actual == Token::ParentesisCierra { self.avanzar(); }
+
+                if let Expresion::Identificador(nombre) = izquierda {
+                    izquierda = Expresion::Llamada { nombre, argumentos };
+                } else { return None; }
+            }
+            // ¡NUEVO!: ACCEDER A PROPIEDAD CON PUNTO
+            else if self.token_actual == Token::Punto {
+                self.avanzar(); // Pasamos '.'
+                if let Token::Identificador(prop) = &self.token_actual {
+                    izquierda = Expresion::AccesoPropiedad {
+                        objeto: Box::new(izquierda),
+                        propiedad: prop.clone(),
+                    };
+                    self.avanzar();
+                } else { return None; }
+            }
+        }
 
         let nombre = match &self.token_actual {
             Token::Identificador(n) => n.clone(),
@@ -707,5 +767,81 @@ impl Parser {
                 ]
             }
         })
+    }
+    fn parse_struct(&mut self) -> Option<Declaracion> {
+        self.avanzar(); // pasamos 'struct'
+        let nombre = match &self.token_actual {
+            Token::Identificador(n) => n.clone(),
+            _ => return None,
+        };
+        self.avanzar(); // pasamos nombre
+        if self.token_actual != Token::LlaveAbre { return None; }
+        self.avanzar(); // pasamos '{'
+
+        let mut campos = Vec::new();
+        while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
+            if self.token_actual == Token::Coma { self.avanzar(); continue; }
+
+            if let Token::Identificador(nom_campo) = &self.token_actual {
+                let campo = nom_campo.clone();
+                self.avanzar(); // pasa nombre del campo
+
+                if self.token_actual == Token::DosPuntos { self.avanzar(); }
+
+                let mut tipo = TipoKura::Desconocido;
+                if let Token::Identificador(t) | Token::Tipo(t) = &self.token_actual {
+                    tipo = TipoKura::from_string(t).unwrap_or(TipoKura::Desconocido);
+                    self.avanzar();
+                }
+                campos.push((campo, tipo));
+            } else { self.avanzar(); } // error recovery
+        }
+        if self.token_actual == Token::LlaveCierra { self.avanzar(); }
+        Some(Declaracion::Struct { nombre, campos })
+    }
+
+    fn parse_instancia_struct(&mut self, nombre: String) -> Option<Expresion> {
+        self.avanzar(); // pasamos '{'
+        let mut campos = Vec::new();
+
+        while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
+            if self.token_actual == Token::Coma { self.avanzar(); continue; }
+
+            let nombre_campo = match &self.token_actual {
+                Token::Identificador(n) => n.clone(),
+                _ => { self.avanzar(); continue; }
+            };
+            self.avanzar(); // pasamos nombre del campo
+
+            if self.token_actual == Token::DosPuntos { self.avanzar(); }
+
+            let expr = self.parse_expresion()?;
+            campos.push((nombre_campo, expr));
+        }
+        if self.token_actual == Token::LlaveCierra { self.avanzar(); }
+        Some(Expresion::InstanciaStruct { nombre, campos })
+    }
+
+    fn parse_reasignacion_propiedad(&mut self) -> Option<Declaracion> {
+        let objeto = match &self.token_actual {
+            Token::Identificador(n) => n.clone(),
+            _ => return None,
+        };
+        self.avanzar(); // pasamos objeto
+        self.avanzar(); // pasamos '.'
+
+        let propiedad = match &self.token_actual {
+            Token::Identificador(n) => n.clone(),
+            _ => return None,
+        };
+        self.avanzar(); // pasamos propiedad
+
+        if self.token_actual != Token::Asignacion { return None; }
+        self.avanzar(); // pasamos '='
+
+        let valor = self.parse_expresion()?;
+        if self.token_actual == Token::PuntoYComa { self.avanzar(); }
+
+        Some(Declaracion::ReasignacionPropiedad { objeto, propiedad, valor })
     }
 }
