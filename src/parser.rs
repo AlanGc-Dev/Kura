@@ -11,6 +11,7 @@ pub struct Parser {
     pub col_siguiente: usize,
     pub linea_actual: usize,    // <-- NUEVO
     pub col_actual: usize,
+    pub lineas_codigo: Vec<String>,
 }
 
 impl Parser {
@@ -31,7 +32,40 @@ impl Parser {
             token_siguiente: siguiente,
             linea_siguiente: l_sig,
             col_siguiente: c_sig,
+            lineas_codigo: fuente.lines().map(|l| l.to_string()).collect()
         }
+    }
+
+    // --- NUEVO: MOTOR DE ERRORES BILINGÜE Y VISUAL ---
+    pub fn reportar_error(&self, codigo_error: &str, token_causante: &Token) {
+        let idioma = "es";
+
+        let mensaje = match (idioma, codigo_error) {
+            ("es", "FALTA_LLAVE") => "Se esperaba abrir una llave '{' despues de esta instruccion.",
+            ("en", "FALTA_LLAVE") => "Expected an opening brace '{' after this instruction.",
+            ("es", "FALTA_TIPO") => "Se esperaba un Tipo de dato valido.",
+            ("en", "FALTA_TIPO") => "Expected a valid Data Type.",
+            ("es", "INSTRUCCION_DESCONOCIDA") => "Palabra o instruccion no reconocida por Kura.",
+            ("en", "INSTRUCCION_DESCONOCIDA") => "Word or instruction not recognized by Kura.",
+            _ => "Error de sintaxis desconocido.",
+        };
+
+        // Extraemos la línea real del archivo (restando 1 porque los arreglos empiezan en 0)
+        let linea_texto = if self.linea_actual > 0 && self.linea_actual <= self.lineas_codigo.len() {
+            &self.lineas_codigo[self.linea_actual - 1]
+        } else {
+            "EOF (Fin de archivo)"
+        };
+
+        // Calculamos dónde poner la flechita exactamente debajo del error
+        let espacio_flecha = if self.col_actual > 0 { self.col_actual - 1 } else { 0 };
+
+        println!("\n🚨 Error de Sintaxis en Kura:");
+        println!("Ocurrió en la Línea {}, Columna {}.", self.linea_actual, self.col_actual);
+        println!("   |");
+        println!("{:>2} | {}", self.linea_actual, linea_texto); // Imprime el número de línea y el código
+        println!("   | {:>width$}^ {}", "", mensaje, width = espacio_flecha);
+        println!();
     }
 
    fn avanzar(&mut self) {
@@ -89,14 +123,14 @@ impl Parser {
                     Token::CorcheteAbre => self.parse_reasignacion_indice(),
                     Token::Punto => self.parse_reasignacion_propiedad(),
                     _ => {
-                        println!("Error Parser [Instruccion]: Variable suelta o palabra no reconocida: {:?} {:?}", self.token_actual, self.token_siguiente);
+                        self.reportar_error("INSTRUCCION_DESCONOCIDA", &self.token_actual);
                         self.avanzar();
                         None
                     }
                 }
             }
             _ => {
-                println!("Error Parser [General]: No se reconocio la instruccion. Ignorando token: {:?}", self.token_actual);
+                self.reportar_error("INSTRUCCION_DESCONOCIDA", &self.token_actual);
                 self.avanzar();
                 None
             }
@@ -435,67 +469,9 @@ impl Parser {
         Some(Declaracion::For { variable, iterable, cuerpo })
     }
 
-    // --- NUEVO: PARSEAR FUNCIONES (MODO SUPERVIVENCIA Y ERROR RECOVERY) ---
+    /// --- NUEVO: PARSEAR FUNCIONES (MODO SUPERVIVENCIA CORRECTO) ---
     fn parse_funcion(&mut self) -> Option<Declaracion> {
         self.avanzar(); // pasamos 'fn'
-        let mut izquierda = match &self.token_actual {
-            Token::Entero(n) => { let e = Expresion::Entero(*n); self.avanzar(); e },
-            Token::Cadena(t) => { let e = Expresion::Cadena(t.clone()); self.avanzar(); e },
-            Token::True => { self.avanzar(); Expresion::Booleano(true) },
-            Token::False => { self.avanzar(); Expresion::Booleano(false) },
-            Token::LlaveAbre => self.parse_diccionario()?,
-            Token::CorcheteAbre => self.parse_arreglo()?,
-            Token::Identificador(nom) => {
-                let id = nom.clone();
-                // ¿Es el inicio de un 'Persona { ... }'?
-                if self.token_siguiente == Token::LlaveAbre {
-                    self.avanzar(); // pasamos el Identificador
-                    self.parse_instancia_struct(id)?
-                } else {
-                    self.avanzar();
-                    Expresion::Identificador(id)
-                }
-            },
-            _ => return None,
-        };
-
-        // --- BUCLE PARA DETECTAR . [ ( ---
-        while self.token_actual == Token::CorcheteAbre || self.token_actual == Token::ParentesisAbre || self.token_actual == Token::Punto {
-            if self.token_actual == Token::CorcheteAbre {
-                self.avanzar();
-                let indice = self.parse_expresion()?;
-                if self.token_actual != Token::CorcheteCierra { return None; }
-                self.avanzar();
-                izquierda = Expresion::Indice { estructura: Box::new(izquierda), indice: Box::new(indice) };
-            }
-            else if self.token_actual == Token::ParentesisAbre {
-                self.avanzar();
-                let mut argumentos = Vec::new();
-                if self.token_actual != Token::ParentesisCierra {
-                    if let Some(arg) = self.parse_expresion() { argumentos.push(arg); }
-                    while self.token_actual == Token::Coma {
-                        self.avanzar();
-                        if let Some(arg) = self.parse_expresion() { argumentos.push(arg); }
-                    }
-                }
-                if self.token_actual == Token::ParentesisCierra { self.avanzar(); }
-
-                if let Expresion::Identificador(nombre) = izquierda {
-                    izquierda = Expresion::Llamada { nombre, argumentos };
-                } else { return None; }
-            }
-            // ¡NUEVO!: ACCEDER A PROPIEDAD CON PUNTO
-            else if self.token_actual == Token::Punto {
-                self.avanzar(); // Pasamos '.'
-                if let Token::Identificador(prop) = &self.token_actual {
-                    izquierda = Expresion::AccesoPropiedad {
-                        objeto: Box::new(izquierda),
-                        propiedad: prop.clone(),
-                    };
-                    self.avanzar();
-                } else { return None; }
-            }
-        }
 
         let nombre = match &self.token_actual {
             Token::Identificador(n) => n.clone(),
@@ -554,17 +530,14 @@ impl Parser {
         }
 
         // --- MAGIA AQUÍ: MODO SUPERVIVENCIA ---
-        // Si por alguna desincronización quedó un token atascado (como tu error),
-        // este bucle lo absorbe y lo salta hasta encontrar la bendita llave '{'
         while self.token_actual != Token::LlaveAbre && self.token_actual != Token::FinDeArchivo {
             self.avanzar();
         }
 
-        // Si logramos llegar a la llave, entramos al cuerpo de la función
         if self.token_actual == Token::LlaveAbre {
             self.avanzar(); // pasamos '{'
         } else {
-            return None; // Si llegamos al fin del archivo sin llaves, abortamos
+            return None;
         }
 
         let mut cuerpo = Vec::new();
@@ -864,18 +837,46 @@ impl Parser {
         self.avanzar(); // pasamos objeto
         self.avanzar(); // pasamos '.'
 
-        let propiedad = match &self.token_actual {
+        let propiedad_o_metodo = match &self.token_actual {
             Token::Identificador(n) => n.clone(),
             _ => return None,
         };
-        self.avanzar(); // pasamos propiedad
+        self.avanzar(); // pasamos propiedad o método
 
-        if self.token_actual != Token::Asignacion { return None; }
-        self.avanzar(); // pasamos '='
+        // CASO 1: Es una reasignacion (ej. heroe.poder = 100;)
+        if self.token_actual == Token::Asignacion {
+            self.avanzar(); // pasamos '='
+            let valor = self.parse_expresion()?;
+            if self.token_actual == Token::PuntoYComa { self.avanzar(); }
 
-        let valor = self.parse_expresion()?;
-        if self.token_actual == Token::PuntoYComa { self.avanzar(); }
+            return Some(Declaracion::ReasignacionPropiedad {
+                objeto,
+                propiedad: propiedad_o_metodo,
+                valor
+            });
+        }
 
-        Some(Declaracion::ReasignacionPropiedad { objeto, propiedad, valor })
+        // CASO 2: Es una llamada a metodo (ej. heroe.atacar(2);)
+        if self.token_actual == Token::ParentesisAbre {
+            self.avanzar(); // pasamos '('
+            let mut argumentos = Vec::new();
+            if self.token_actual != Token::ParentesisCierra {
+                if let Some(arg) = self.parse_expresion() { argumentos.push(arg); }
+                while self.token_actual == Token::Coma {
+                    self.avanzar();
+                    if let Some(arg) = self.parse_expresion() { argumentos.push(arg); }
+                }
+            }
+            if self.token_actual == Token::ParentesisCierra { self.avanzar(); }
+            if self.token_actual == Token::PuntoYComa { self.avanzar(); }
+
+            return Some(Declaracion::LlamadaMetodoSuelta {
+                objeto: Box::new(Expresion::Identificador(objeto)),
+                metodo: propiedad_o_metodo,
+                argumentos
+            });
+        }
+
+        None
     }
 }

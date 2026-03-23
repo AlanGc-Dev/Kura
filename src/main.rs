@@ -35,7 +35,7 @@ fn main() {
 
     // --- EL MOTOR DE KURA ---
     let lexer = Lexer::new(&codigo_kura);
-    let mut parser = Parser::new(lexer);
+    let mut parser = parser::Parser::new(lexer, &contenido); // <-- Le enviamos el contenido
     let programa = parser.parse_programa();
 
     let entorno = evaluator::Entorno::new(); // <-- Ya no es mut

@@ -253,7 +253,7 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: Rc<RefCell<Entorno>>) 
             };
 
             let lexer = crate::lexer::Lexer::new(&contenido);
-            let mut parser = crate::parser::Parser::new(lexer);
+            let mut parser = crate::parser::Parser::new(lexer, &contenido);
             let programa_modulo = parser.parse_programa();
 
             let entorno_modulo = Entorno::new();
@@ -284,6 +284,10 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: Rc<RefCell<Entorno>>) 
 
             let def = DefinicionStruct { nombre: nombre.clone(), campos: campos_map, metodos: metodos_map };
             entorno.borrow_mut().structs.insert(nombre, def);
+            ObjetoKura::Nulo
+        }
+        Declaracion::LlamadaMetodoSuelta { objeto, metodo, argumentos } => {
+            evaluar_expresion(Expresion::LlamadaMetodo { objeto, metodo, argumentos }, Rc::clone(&entorno));
             ObjetoKura::Nulo
         }
         Declaracion::ReasignacionPropiedad { objeto, propiedad, valor } => {
@@ -351,6 +355,7 @@ fn evaluar_expresion(expresion: Expresion, entorno: Rc<RefCell<Entorno>>) -> Obj
             } else { println!("Error: Solo puedes llamar metodos en un Struct"); }
             ObjetoKura::Nulo
         }
+
         Expresion::Indice { estructura, indice } => {
             let estructura_evaluada = evaluar_expresion(*estructura, Rc::clone(&entorno));
             let indice_evaluado = evaluar_expresion(*indice, Rc::clone(&entorno));

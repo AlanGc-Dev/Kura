@@ -16,7 +16,7 @@ struct Personaje {
 
 let heroe = Personaje {
     nombre: "Goku",
-    poder: 10
+    poder: 10s
 };
 
 heroe.atacar(2);

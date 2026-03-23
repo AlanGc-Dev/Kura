@@ -53,6 +53,11 @@ pub enum Declaracion {
         nombre: String,
         argumentos: Vec<Expresion>,
     },
+    LlamadaMetodoSuelta {
+        objeto: Box<Expresion>,
+        metodo: String,
+        argumentos: Vec<Expresion>,
+    },
     Importar {
         elementos: Vec<String>, // Guarda ["funcion1", "variable2"]
         archivo: String,        // Guarda "archivo.kr"
@@ -143,5 +148,6 @@ pub enum Expresion {
         metodo: String,
         argumentos: Vec<Expresion>,
     },
+    
 
 }
