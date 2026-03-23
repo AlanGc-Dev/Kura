@@ -38,10 +38,12 @@ pub struct DefinicionEnum {
     pub variantes: HashMap<String, usize>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DefinicionStruct {
     pub nombre: String,
     pub campos: HashMap<String, TipoKura>,
+    pub metodos: HashMap<String, ObjetoKura>,
 }
 
 // --- EL NUEVO ENTORNO INTELIGENTE ---
@@ -266,12 +268,21 @@ fn evaluar_declaracion(declaracion: Declaracion, entorno: Rc<RefCell<Entorno>>) 
             }
             ObjetoKura::Nulo
         },
-        Declaracion::Struct { nombre, campos } => {
+        Declaracion::Struct { nombre, campos, metodos } => {
             let mut campos_map = HashMap::new();
             for (c_nom, c_tipo) in campos {
                 campos_map.insert(c_nom, c_tipo);
             }
-            let def = DefinicionStruct { nombre: nombre.clone(), campos: campos_map };
+
+            // --- NUEVO: Extraer funciones y guardarlas ---
+            let mut metodos_map = HashMap::new();
+            for m in metodos {
+                if let Declaracion::Funcion { nombre: n_metodo, parametros, retorno, cuerpo } = m {
+                    metodos_map.insert(n_metodo, ObjetoKura::Funcion { parametros, retorno, cuerpo });
+                }
+            }
+
+            let def = DefinicionStruct { nombre: nombre.clone(), campos: campos_map, metodos: metodos_map };
             entorno.borrow_mut().structs.insert(nombre, def);
             ObjetoKura::Nulo
         }
@@ -299,6 +310,46 @@ fn evaluar_expresion(expresion: Expresion, entorno: Rc<RefCell<Entorno>>) -> Obj
                 evaluados.push(evaluar_expresion(el, Rc::clone(&entorno)));
             }
             ObjetoKura::Arreglo(evaluados)
+        }
+        Expresion::LlamadaMetodo { objeto, metodo, argumentos } => {
+            let obj_evaluado = evaluar_expresion(*objeto, Rc::clone(&entorno));
+
+            if let ObjetoKura::InstanciaStruct { nombre: nombre_struct, .. } = &obj_evaluado {
+                let def_struct = entorno.borrow().structs.get(nombre_struct).cloned();
+
+                if let Some(def) = def_struct {
+                    if let Some(ObjetoKura::Funcion { parametros, cuerpo, .. }) = def.metodos.get(&metodo) {
+
+                        if parametros.is_empty() {
+                            println!("Error: El metodo '{}' debe tener 'self' como primer parametro.", metodo);
+                            return ObjetoKura::Nulo;
+                        }
+
+                        let entorno_local = Entorno::extend(Rc::clone(&entorno));
+
+                        // INYECTAR 'self'
+                        let nombre_self = parametros[0].0.clone();
+                        entorno_local.borrow_mut().guardar(nombre_self, obj_evaluado.clone());
+
+                        // Pasar los demás argumentos
+                        for (i, arg_expr) in argumentos.into_iter().enumerate() {
+                            let arg_val = evaluar_expresion(arg_expr, Rc::clone(&entorno));
+                            entorno_local.borrow_mut().guardar(parametros[i + 1].0.clone(), arg_val);
+                        }
+
+                        let mut valor_retornado = ObjetoKura::Nulo;
+                        for decl in cuerpo.clone() {
+                            let res = evaluar_declaracion(decl, Rc::clone(&entorno_local));
+                            if let ObjetoKura::Retorno(valor) = res {
+                                valor_retornado = *valor;
+                                break;
+                            }
+                        }
+                        return valor_retornado;
+                    } else { println!("Error: El metodo '{}' no existe en '{}'", metodo, nombre_struct); }
+                }
+            } else { println!("Error: Solo puedes llamar metodos en un Struct"); }
+            ObjetoKura::Nulo
         }
         Expresion::Indice { estructura, indice } => {
             let estructura_evaluada = evaluar_expresion(*estructura, Rc::clone(&entorno));

@@ -68,6 +68,7 @@ pub enum Declaracion {
     Struct {
         nombre: String,
         campos: Vec<(String, TipoKura)>,
+        metodos: Vec<Declaracion>,
     },
     ReasignacionPropiedad {
         objeto: String,
@@ -136,6 +137,11 @@ pub enum Expresion {
     AccesoPropiedad {
         objeto: Box<Expresion>,
         propiedad: String,
+    },
+    LlamadaMetodo {
+        objeto: Box<Expresion>,
+        metodo: String,
+        argumentos: Vec<Expresion>,
     },
 
 }

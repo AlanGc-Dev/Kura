@@ -1,19 +1,24 @@
-struct Creador {
+struct Personaje {
     nombre: Cadena,
-    nivel: Entero
+    poder: Entero,
+
+    fn atacar(self, dano) {
+        print self.nombre + " ataca con fuerza de:";
+        print dano * self.poder;
+    }
+
+    fn entrenar(self) {
+        self.poder = self.poder + 5;
+        print self.nombre + " entreno y ahora su poder es:";
+        print self.poder;
+    }
 }
 
-let yo = Creador {
-    nombre: "Alan",
-    nivel: 99
+let heroe = Personaje {
+    nombre: "Goku",
+    poder: 10
 };
 
-print yo;
-
-print "Subiendo de nivel a:";
-print yo.nombre;
-
-// ¡Esto no era posible antes! Modificar propiedades:
-yo.nivel = 100;
-
-print yo;
+heroe.atacar(2);
+heroe.entrenar();
+heroe.atacar(2);

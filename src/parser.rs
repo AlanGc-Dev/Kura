@@ -631,27 +631,38 @@ impl Parser {
     }
 
     fn parse_expresion(&mut self) -> Option<Expresion> {
+        // --- INICIO ROBUSTO DE EXPRESION ---
         let mut izquierda = match &self.token_actual {
-            Token::Entero(n) => Expresion::Entero(*n),
-            Token::Identificador(nom) => Expresion::Identificador(nom.clone()),
-            Token::True => Expresion::Booleano(true),
-            Token::False => Expresion::Booleano(false),
-            Token::LlaveAbre => return self.parse_diccionario(),
-            Token::Cadena(texto) => Expresion::Cadena(texto.clone()),
-            Token::CorcheteAbre => return self.parse_arreglo(),
+            Token::Entero(n) => { let e = Expresion::Entero(*n); self.avanzar(); e },
+            Token::Cadena(t) => { let e = Expresion::Cadena(t.clone()); self.avanzar(); e },
+            Token::True => { self.avanzar(); Expresion::Booleano(true) },
+            Token::False => { self.avanzar(); Expresion::Booleano(false) },
+            Token::LlaveAbre => self.parse_diccionario()?,
+            Token::CorcheteAbre => self.parse_arreglo()?,
+            Token::Identificador(nom) => {
+                let id = nom.clone();
+                // ¿Es el inicio de un 'Persona { ... }'?
+                if self.token_siguiente == Token::LlaveAbre {
+                    self.avanzar(); // pasamos el Identificador
+                    self.parse_instancia_struct(id)?
+                } else {
+                    self.avanzar();
+                    Expresion::Identificador(id)
+                }
+            },
             _ => return None,
         };
-        self.avanzar();
 
-        // <-- NUEVO: Reconocer arreglos [ ] o llamadas a función ( )
-        while self.token_actual == Token::CorcheteAbre || self.token_actual == Token::ParentesisAbre {
+        // --- BUCLE PARA DETECTAR . [ ( ---
+        while self.token_actual == Token::CorcheteAbre || self.token_actual == Token::ParentesisAbre || self.token_actual == Token::Punto {
             if self.token_actual == Token::CorcheteAbre {
                 self.avanzar();
                 let indice = self.parse_expresion()?;
                 if self.token_actual != Token::CorcheteCierra { return None; }
                 self.avanzar();
                 izquierda = Expresion::Indice { estructura: Box::new(izquierda), indice: Box::new(indice) };
-            } else if self.token_actual == Token::ParentesisAbre {
+            }
+            else if self.token_actual == Token::ParentesisAbre {
                 self.avanzar(); // Pasamos '('
                 let mut argumentos = Vec::new();
                 if self.token_actual != Token::ParentesisCierra {
@@ -663,11 +674,24 @@ impl Parser {
                 }
                 if self.token_actual == Token::ParentesisCierra { self.avanzar(); }
 
+                // --- NUEVO: ¿Es función normal o es objeto.metodo()? ---
                 if let Expresion::Identificador(nombre) = izquierda {
                     izquierda = Expresion::Llamada { nombre, argumentos };
-                } else {
-                    return None;
-                }
+                } else if let Expresion::AccesoPropiedad { objeto, propiedad } = izquierda {
+                    // ¡Atrapamos la llamada al método!
+                    izquierda = Expresion::LlamadaMetodo { objeto, metodo: propiedad, argumentos };
+                } else { return None; }
+            }
+            // ¡NUEVO!: ACCEDER A PROPIEDAD CON PUNTO (ej. yo.nombre)
+            else if self.token_actual == Token::Punto {
+                self.avanzar(); // Pasamos '.'
+                if let Token::Identificador(prop) = &self.token_actual {
+                    izquierda = Expresion::AccesoPropiedad {
+                        objeto: Box::new(izquierda),
+                        propiedad: prop.clone(),
+                    };
+                    self.avanzar();
+                } else { return None; }
             }
         }
 
@@ -685,7 +709,6 @@ impl Parser {
                     derecha: Box::new(derecha),
                 });
             }
-
             _ => {}
         }
 
@@ -779,9 +802,20 @@ impl Parser {
         self.avanzar(); // pasamos '{'
 
         let mut campos = Vec::new();
+        let mut metodos = Vec::new(); // <-- NUEVO: Lista para los métodos
+
         while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
             if self.token_actual == Token::Coma { self.avanzar(); continue; }
 
+            // MAGIA: Si vemos 'fn', guardamos un método
+            if self.token_actual == Token::Fn {
+                if let Some(metodo) = self.parse_funcion() {
+                    metodos.push(metodo);
+                }
+                continue;
+            }
+
+            // Si no es 'fn', leemos un campo normal
             if let Token::Identificador(nom_campo) = &self.token_actual {
                 let campo = nom_campo.clone();
                 self.avanzar(); // pasa nombre del campo
@@ -797,7 +831,7 @@ impl Parser {
             } else { self.avanzar(); } // error recovery
         }
         if self.token_actual == Token::LlaveCierra { self.avanzar(); }
-        Some(Declaracion::Struct { nombre, campos })
+        Some(Declaracion::Struct { nombre, campos, metodos })
     }
 
     fn parse_instancia_struct(&mut self, nombre: String) -> Option<Expresion> {
