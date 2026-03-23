@@ -433,80 +433,88 @@ impl Parser {
         Some(Declaracion::For { variable, iterable, cuerpo })
     }
 
-    // --- NUEVO: PARSEAR FUNCIONES (BLINDADO Y ROBUSTO) ---
+    // --- NUEVO: PARSEAR FUNCIONES (MODO SUPERVIVENCIA Y ERROR RECOVERY) ---
     fn parse_funcion(&mut self) -> Option<Declaracion> {
         self.avanzar(); // pasamos 'fn'
+
         let nombre = match &self.token_actual {
             Token::Identificador(n) => n.clone(),
             _ => return None,
         };
-        self.avanzar();
+        self.avanzar(); // pasamos el nombre
+
         if self.token_actual != Token::ParentesisAbre { return None; }
-        self.avanzar();
+        self.avanzar(); // pasamos '('
 
         let mut parametros = Vec::new();
 
-        // --- BUCLE ROBUSTO PARA PARÁMETROS ---
-        // Leerá hasta encontrar un ')' o llegar al fin del archivo
+        // Bucle flexible para parámetros
         while self.token_actual != Token::ParentesisCierra && self.token_actual != Token::FinDeArchivo {
-
-            // Si encuentra una coma, la saltamos felizmente y continuamos
             if self.token_actual == Token::Coma {
-                self.avanzar();
-                continue;
+                self.avanzar(); continue;
             }
 
-            if let Token::Identificador(p) = &self.token_actual {
-                let nombre_param = p.clone();
-                self.avanzar();
+            let nombre_param = match &self.token_actual {
+                Token::Identificador(n) => n.clone(),
+                _ => { self.avanzar(); continue; }
+            };
+            self.avanzar(); // pasamos el nombre (ej. 'a')
 
-                let mut tipo_param = None;
-                if self.token_actual == Token::DosPuntos {
-                    self.avanzar(); // pasamos ':'
-                    let tipo_str = match &self.token_actual {
-                        Token::Tipo(t) | Token::Identificador(t) => t.clone(),
-                        _ => {
-                            println!("Error Parser: Esperaba un Tipo de dato para '{}', encontre {:?}", nombre_param, self.token_actual);
-                            return None;
-                        }
-                    };
-                    tipo_param = TipoKura::from_string(&tipo_str);
-                    self.avanzar();
-                }
-                parametros.push((nombre_param, tipo_param));
-            } else {
-                println!("Error Parser: Parametro invalido en funcion '{}': {:?}", nombre, self.token_actual);
-                return None;
+            // Saltamos ':' si el usuario lo puso (opcional)
+            if self.token_actual == Token::DosPuntos {
+                self.avanzar();
             }
+
+            let mut tipo_param = None;
+            // Tomamos el tipo si el usuario lo escribió
+            if let Token::Identificador(t) | Token::Tipo(t) = &self.token_actual {
+                tipo_param = TipoKura::from_string(t);
+                self.avanzar(); // pasamos el tipo (ej. 'Entero')
+            }
+
+            parametros.push((nombre_param, tipo_param));
         }
 
-        if self.token_actual == Token::ParentesisCierra { self.avanzar(); }
+        if self.token_actual == Token::ParentesisCierra {
+            self.avanzar(); // pasamos ')'
+        }
 
+        // --- RETORNO (Estilo Rust, Kotlin o ninguno) ---
         let mut retorno = None;
-        if self.token_actual == Token::DosPuntos { // Retorno opcional estilo Kotlin
-            self.avanzar(); // pasamos ':'
-            let tipo_str = match &self.token_actual {
-                Token::Tipo(t) | Token::Identificador(t) => t.clone(),
-                _ => {
-                    println!("Error Parser: Esperaba un Tipo de retorno para la funcion, encontre {:?}", self.token_actual);
-                    return None;
-                }
-            };
-            retorno = TipoKura::from_string(&tipo_str);
+
+        // Saltamos ':' o '->' si están
+        if self.token_actual == Token::DosPuntos || self.token_actual == Token::Flecha {
             self.avanzar();
         }
 
-        if self.token_actual != Token::LlaveAbre {
-            println!("Error Parser: Esperaba '{{' despues de la definicion de la funcion");
-            return None;
+        // Leemos el tipo de retorno si lo hay
+        if let Token::Identificador(t) | Token::Tipo(t) = &self.token_actual {
+            retorno = TipoKura::from_string(t);
+            self.avanzar(); // pasamos el tipo de retorno
         }
-        self.avanzar();
+
+        // --- MAGIA AQUÍ: MODO SUPERVIVENCIA ---
+        // Si por alguna desincronización quedó un token atascado (como tu error),
+        // este bucle lo absorbe y lo salta hasta encontrar la bendita llave '{'
+        while self.token_actual != Token::LlaveAbre && self.token_actual != Token::FinDeArchivo {
+            self.avanzar();
+        }
+
+        // Si logramos llegar a la llave, entramos al cuerpo de la función
+        if self.token_actual == Token::LlaveAbre {
+            self.avanzar(); // pasamos '{'
+        } else {
+            return None; // Si llegamos al fin del archivo sin llaves, abortamos
+        }
 
         let mut cuerpo = Vec::new();
         while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
             if let Some(decl) = self.parse_declaracion() { cuerpo.push(decl); }
         }
-        self.avanzar(); // pasamos '}'
+
+        if self.token_actual == Token::LlaveCierra {
+            self.avanzar(); // pasamos '}'
+        }
 
         Some(Declaracion::Funcion { nombre, parametros, retorno, cuerpo })
     }

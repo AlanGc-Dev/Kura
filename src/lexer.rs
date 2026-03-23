@@ -137,7 +137,6 @@ impl Lexer {
             _ => Token::Ilegal,
         };
 
-        self.position += 1;
         self.avanzar_char();
         token
     }
