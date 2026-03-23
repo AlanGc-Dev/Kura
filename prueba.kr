@@ -1,24 +1,23 @@
-struct Personaje {
-    nombre: Cadena,
-    poder: Entero,
+struct Archivo {
+    ruta: Cadena,
 
-    fn atacar(self, dano) {
-        print self.nombre + " ataca con fuerza de:";
-        print dano * self.poder;
+    fn escribir(self, contenido: Cadena) {
+        native_escribir_archivo(self.ruta, contenido);
+        print "Archivo guardado con exito!";
     }
 
-    fn entrenar(self) {
-        self.poder = self.poder + 5;
-        print self.nombre + " entreno y ahora su poder es:";
-        print self.poder;
+    fn leer(self) {
+        let texto = native_leer_archivo(self.ruta);
+        print "Contenido del archivo:";
+        print texto;
     }
 }
 
-let heroe = Personaje {
-    nombre: "Goku",
-    poder: 10s
-};
+// 1. Instanciamos nuestra nueva herramienta
+let mi_archivo = Archivo { ruta: "secreto.txt" };
 
-heroe.atacar(2);
-heroe.entrenar();
-heroe.atacar(2);
+// 2. Kura se comunica con el Sistema Operativo
+mi_archivo.escribir("Hola desde Kura! Este archivo fue creado por mi propio lenguaje.");
+
+// 3. Leemos el disco duro
+mi_archivo.leer();

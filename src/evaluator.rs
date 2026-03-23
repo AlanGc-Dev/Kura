@@ -30,6 +30,7 @@ pub enum ObjetoKura {
         nombre: String,
         campos: Rc<RefCell<HashMap<String, ObjetoKura>>>,
     },
+    FuncionNativa(fn(Vec<ObjetoKura>) -> ObjetoKura),
 }
 
 #[derive(Debug, Clone)]
@@ -57,8 +58,38 @@ pub struct Entorno {
 
 impl Entorno {
     pub fn new() -> Rc<RefCell<Self>> {
+        let mut variables = HashMap::new();
+
+        // ---------------------------------------------------------
+        // 🚀 LIBRERÍA ESTÁNDAR: PUENTES NATIVOS RUST -> KURA
+        // ---------------------------------------------------------
+
+        // 1. native_leer_archivo(ruta)
+        variables.insert("native_leer_archivo".to_string(), ObjetoKura::FuncionNativa(|args| {
+            if args.len() != 1 { return ObjetoKura::Nulo; }
+            if let ObjetoKura::Cadena(ruta) = &args[0] {
+                match std::fs::read_to_string(ruta) {
+                    Ok(contenido) => return ObjetoKura::Cadena(contenido),
+                    Err(_) => return ObjetoKura::Cadena("ERROR: No se pudo leer el archivo".to_string()),
+                }
+            }
+            ObjetoKura::Nulo
+        }));
+
+        // 2. native_escribir_archivo(ruta, contenido)
+        variables.insert("native_escribir_archivo".to_string(), ObjetoKura::FuncionNativa(|args| {
+            if args.len() != 2 { return ObjetoKura::Nulo; }
+            if let (ObjetoKura::Cadena(ruta), ObjetoKura::Cadena(contenido)) = (&args[0], &args[1]) {
+                match std::fs::write(ruta, contenido) {
+                    Ok(_) => return ObjetoKura::Booleano(true),
+                    Err(_) => return ObjetoKura::Booleano(false),
+                }
+            }
+            ObjetoKura::Nulo
+        }));
+
         Rc::new(RefCell::new(Entorno {
-            variables: HashMap::new(),
+            variables,
             enums: HashMap::new(),
             padre: None,
             structs: Default::default(),
@@ -462,6 +493,15 @@ fn evaluar_expresion(expresion: Expresion, entorno: Rc<RefCell<Entorno>>) -> Obj
 
             // BUSCAMOS EN EL ENTORNO
             let funcion = entorno.borrow().obtener(&nombre);
+
+            // --- NUEVO: EJECUTAR FUNCIONES NATIVAS DE RUST ---
+            if let Some(ObjetoKura::FuncionNativa(func_rust)) = funcion.clone() {
+                let mut argumentos_evaluados = Vec::new();
+                for arg_expr in argumentos {
+                    argumentos_evaluados.push(evaluar_expresion(arg_expr, Rc::clone(&entorno)));
+                }
+                return func_rust(argumentos_evaluados); // Rust hace el trabajo sucio
+            }
 
             if let Some(ObjetoKura::Funcion { parametros, retorno, cuerpo }) = funcion {
                 if argumentos.len() != parametros.len() {

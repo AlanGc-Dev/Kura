@@ -15,7 +15,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(mut lexer: Lexer) -> Self {
+    pub fn new(mut lexer: Lexer, fuente: &str) -> Self {
         let actual = lexer.next_token();
         let l_actual = lexer.linea;
         let c_actual = lexer.columna;
@@ -37,7 +37,7 @@ impl Parser {
     }
 
     // --- NUEVO: MOTOR DE ERRORES BILINGÜE Y VISUAL ---
-    pub fn reportar_error(&self, codigo_error: &str, token_causante: &Token) {
+    pub fn reportar_error(&self, codigo_error: &str, _token_causante: &Token) {
         let idioma = "es";
 
         let mensaje = match (idioma, codigo_error) {
@@ -63,7 +63,7 @@ impl Parser {
         println!("\n🚨 Error de Sintaxis en Kura:");
         println!("Ocurrió en la Línea {}, Columna {}.", self.linea_actual, self.col_actual);
         println!("   |");
-        println!("{:>2} | {}", self.linea_actual, linea_texto); // Imprime el número de línea y el código
+        println!("{:>2} | {}", self.linea_actual, linea_texto.replace("\t", "    "));
         println!("   | {:>width$}^ {}", "", mensaje, width = espacio_flecha);
         println!();
     }
