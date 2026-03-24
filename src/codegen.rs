@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 
-use crate::ast::{Programa, Declaracion, Expresion};
+use crate::ast::{Programa, Declaracion, Expresion, Pattern};
 use crate::token::Token;
 
 /// CodeGenerator genera IR LLVM que se compila a código máquina nativo
@@ -135,9 +135,20 @@ impl CodeGenerator {
     fn generate_statement(&mut self, stmt: &Declaracion) -> Result<(), String> {
         match stmt {
             Declaracion::Let { nombre, valor, .. } => {
-                // Obtenemos tanto el registro como el tipo (ej: "i64" o "i8*")
                 let (reg, tipo) = self.generate_expr(valor)?;
-                self.current_scope.insert(nombre.clone(), (reg, tipo));
+
+                // 🚀 NUEVO: Si es un número simple, pedimos RAM de verdad para poder mutarlo en ciclos
+                if tipo == "i64" {
+                    let ptr_reg = self.new_reg();
+                    self.ir_code.push_str(&format!("  {} = alloca i64\n", ptr_reg));
+                    self.ir_code.push_str(&format!("  store i64 {}, i64* {}\n", reg, ptr_reg));
+
+                    // Guardamos el puntero (i64*) en el scope local
+                    self.current_scope.insert(nombre.clone(), (ptr_reg, "i64*".to_string()));
+                } else {
+                    // Cadenas, Arreglos y Structs ya vienen con su propia memoria
+                    self.current_scope.insert(nombre.clone(), (reg, tipo));
+                }
             }
 
 
@@ -274,8 +285,19 @@ impl CodeGenerator {
                 }
             }
             Declaracion::Reasignacion { nombre, valor } => {
-                let (reg, tipo) = self.generate_expr(valor)?;
-                self.current_scope.insert(nombre.clone(), (reg, tipo));
+                let (val_reg, tipo_nuevo) = self.generate_expr(valor)?;
+
+                if let Some((ptr_reg, tipo_guardado)) = self.current_scope.get(nombre).cloned() {
+                    // 🚀 NUEVO: Si la variable está en la RAM, sobrescribimos los bytes
+                    if tipo_guardado == "i64*" && tipo_nuevo == "i64" {
+                        self.ir_code.push_str(&format!("  store i64 {}, i64* {}\n", val_reg, ptr_reg));
+                    } else {
+                        // Reasignación normal para otras cosas
+                        self.current_scope.insert(nombre.clone(), (val_reg, tipo_nuevo));
+                    }
+                } else {
+                    return Err(format!("Variable '{}' no definida", nombre));
+                }
             }
             Declaracion::If { condicion, consecuencia, alternativa } => {
                 let (cond_reg, _) = self.generate_expr(condicion)?;
@@ -363,6 +385,87 @@ impl CodeGenerator {
 
                 // --- FIN DEL CICLO ---
                 self.ir_code.push_str(&format!("for.end.{}:\n", loop_end));
+            }
+            // --- NUEVO: PATTERN MATCHING (El Súper Switch) ---
+            Declaracion::Match { valor, casos } => {
+                // 1. Evaluamos el valor principal a comparar
+                let (mut val_reg, val_tipo) = self.generate_expr(valor)?;
+
+                // Si el valor viene de una variable mutable (RAM), lo leemos (load)
+                if val_tipo == "i64*" {
+                    let loaded = self.new_reg();
+                    self.ir_code.push_str(&format!("  {} = load i64, i64* {}\n", loaded, val_reg));
+                    val_reg = loaded;
+                }
+
+                // Creamos una etiqueta de salida general para todo el bloque match
+                let end_label = format!("match.end.{}", self.var_counter);
+                self.var_counter += 1;
+
+                // 2. Evaluamos cada caso uno por uno
+                for caso in casos {
+                    match &caso.patron {
+                        Pattern::Comodin => {
+                            // CASO DEFAULT: '_' (Atrapa cualquier cosa)
+                            for stmt in &caso.cuerpo {
+                                self.generate_statement(stmt)?;
+                            }
+                            // Terminamos y saltamos al final del match
+                            self.ir_code.push_str(&format!("  br label %{}\n", end_label));
+                        },
+                        Pattern::Identificador(nombre) => {
+                            // Verificamos si es una variable que ya existe
+                            if let Some((cmp_reg, cmp_tipo)) = self.current_scope.get(nombre).cloned() {
+
+                                let mut final_cmp = cmp_reg;
+                                if cmp_tipo == "i64*" {
+                                    let loaded = self.new_reg();
+                                    self.ir_code.push_str(&format!("  {} = load i64, i64* {}\n", loaded, final_cmp));
+                                    final_cmp = loaded;
+                                }
+
+                                // Comparamos: ¿El valor del match == la variable del caso?
+                                let is_eq = self.new_reg();
+                                self.ir_code.push_str(&format!("  {} = icmp eq i64 {}, {}\n", is_eq, val_reg, final_cmp));
+
+                                let body_label = format!("match.body.{}", self.var_counter);
+                                let next_label = format!("match.next.{}", self.var_counter + 1);
+                                self.var_counter += 2;
+
+                                // Si son iguales, vamos al cuerpo. Si no, saltamos al siguiente caso.
+                                self.ir_code.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_eq, body_label, next_label));
+
+                                // --- Cuerpo del Caso ---
+                                self.ir_code.push_str(&format!("{}:\n", body_label));
+                                for stmt in &caso.cuerpo {
+                                    self.generate_statement(stmt)?;
+                                }
+                                self.ir_code.push_str(&format!("  br label %{}\n", end_label));
+
+                                // --- Siguiente Caso ---
+                                self.ir_code.push_str(&format!("{}:\n", next_label));
+                            } else {
+                                // MODO BINDING: Si la variable no existe, creamos una variable temporal (como en Rust)
+                                let previous_scope = self.current_scope.clone();
+                                self.current_scope.insert(nombre.clone(), (val_reg.clone(), "i64".to_string()));
+
+                                for stmt in &caso.cuerpo {
+                                    self.generate_statement(stmt)?;
+                                }
+                                self.ir_code.push_str(&format!("  br label %{}\n", end_label));
+
+                                // Restauramos el entorno (la variable temporal desaparece aquí)
+                                self.current_scope = previous_scope;
+                            }
+                        },
+                        _ => {
+                            println!("⚠️ Patrón complejo no soportado aún en LLVM IR");
+                        }
+                    }
+                }
+
+                // 3. Etiqueta final para continuar el programa
+                self.ir_code.push_str(&format!("{}:\n", end_label));
             }
             Declaracion::While { condicion, cuerpo } => {
                 let loop_label = self.var_counter;
@@ -489,9 +592,18 @@ impl CodeGenerator {
                 Ok((val_reg, "i64".to_string()))
             }
             Expresion::Identificador(name) => {
-                if let Some((reg, tipo)) = self.current_scope.get(name) {
-                    // ¡MODIFICADO! Ahora devolvemos su tipo real (i64 o i8*)
-                    Ok((reg.clone(), tipo.clone()))
+                // 🚀 SOLUCIÓN: Agregamos .cloned() aquí al final
+                if let Some((reg, tipo)) = self.current_scope.get(name).cloned() {
+
+                    // Si es un número mutable de la RAM, lo extraemos con 'load'
+                    if tipo == "i64*" {
+                        let val_reg = self.new_reg();
+                        self.ir_code.push_str(&format!("  {} = load i64, i64* {}\n", val_reg, reg));
+                        Ok((val_reg, "i64".to_string()))
+                    } else {
+                        Ok((reg, tipo))
+                    }
+
                 } else {
                     Err(format!("Variable {} no definida", name))
                 }

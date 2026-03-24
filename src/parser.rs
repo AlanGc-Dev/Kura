@@ -477,7 +477,6 @@ impl Parser {
         self.prohibir_structs = true;
         let iterable = self.parse_expresion()?;
         self.prohibir_structs = false;
-        let iterable = self.parse_expresion()?;
         if self.token_actual != Token::LlaveAbre { return None; }
         self.avanzar();
         let mut cuerpo = Vec::new();
