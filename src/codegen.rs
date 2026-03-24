@@ -241,6 +241,51 @@ impl CodeGenerator {
             Expresion::Entero(n) => {
                 Ok((n.to_string(), "i64".to_string()))
             }
+            // --- NUEVO: SOPORTE PARA BOOLEANOS ---
+            Expresion::Booleano(valor) => {
+                // Traducimos 'true' a 1 y 'false' a 0, guardándolos como i64
+                let num_str = if *valor { "1" } else { "0" };
+                Ok((num_str.to_string(), "i64".to_string()))
+            }
+            // --- NUEVO: CREACIÓN DE ARREGLOS ---
+            Expresion::Arreglo(elementos) => {
+                let len = elementos.len();
+                let arr_ptr = self.new_reg();
+
+                // 1. Reservamos memoria para N números de 64 bits (i64)
+                self.ir_code.push_str(&format!("  {} = alloca i64, i32 {}\n", arr_ptr, len));
+
+                // 2. Guardamos cada elemento en su posición correspondiente
+                for (i, elem) in elementos.iter().enumerate() {
+                    let (val_reg, _) = self.generate_expr(elem)?;
+                    let elem_ptr = self.new_reg();
+
+                    // Calculamos la dirección de memoria de este índice
+                    self.ir_code.push_str(&format!("  {} = getelementptr inbounds i64, i64* {}, i32 {}\n", elem_ptr, arr_ptr, i));
+                    // Guardamos el valor ahí
+                    self.ir_code.push_str(&format!("  store i64 {}, i64* {}\n", val_reg, elem_ptr));
+                }
+
+                // Devolvemos el puntero del arreglo y le decimos a Kura que es un "i64*" (Puntero a números)
+                Ok((arr_ptr, "i64*".to_string()))
+            }
+            // --- NUEVO: LEER DE UN ARREGLO ---
+            Expresion::Indice { estructura, indice } => {
+                // Evaluamos el nombre de la lista (nos dará el puntero) y el número del índice
+                let (arr_reg, _) = self.generate_expr(estructura)?;
+                let (idx_reg, _) = self.generate_expr(indice)?;
+
+                let elem_ptr = self.new_reg();
+                // Buscamos la dirección en la memoria
+                self.ir_code.push_str(&format!("  {} = getelementptr inbounds i64, i64* {}, i64 {}\n", elem_ptr, arr_reg, idx_reg));
+
+                let val_reg = self.new_reg();
+                // Extraemos (load) el valor de esa dirección
+                self.ir_code.push_str(&format!("  {} = load i64, i64* {}\n", val_reg, elem_ptr));
+
+                // Lo que sale de un arreglo de números es, obviamente, un número (i64)
+                Ok((val_reg, "i64".to_string()))
+            }
             Expresion::Identificador(name) => {
                 if let Some((reg, tipo)) = self.current_scope.get(name) {
                     // ¡MODIFICADO! Ahora devolvemos su tipo real (i64 o i8*)
@@ -251,7 +296,23 @@ impl CodeGenerator {
             }
             // --- NUEVO: EVALUACIÓN DE LLAMADAS A FUNCIONES ---
             Expresion::Llamada { nombre, argumentos } => {
+
+                if nombre == "reemplazar" && argumentos.len() == 3 {
+                    let (arr_reg, _) = self.generate_expr(&argumentos[0])?;
+                    let (idx_reg, _) = self.generate_expr(&argumentos[1])?;
+                    let (val_reg, _) = self.generate_expr(&argumentos[2])?;
+
+                    let elem_ptr = self.new_reg();
+                    // Buscamos la memoria
+                    self.ir_code.push_str(&format!("  {} = getelementptr inbounds i64, i64* {}, i64 {}\n", elem_ptr, arr_reg, idx_reg));
+                    // Sobrescribimos con el nuevo valor
+                    self.ir_code.push_str(&format!("  store i64 {}, i64* {}\n", val_reg, elem_ptr));
+
+                    // Devolvemos el mismo puntero para que Kura no pierda la referencia original
+                    return Ok((arr_reg, "i64*".to_string()));
+                }
                 let mut args_ir = Vec::new();
+
                 // Compilamos cada argumento
                 for arg in argumentos {
                     let (reg, _) = self.generate_expr(arg)?;

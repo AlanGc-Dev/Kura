@@ -1,0 +1,20 @@
+let activo = true;
+let inactivo = false;
+
+if activo {
+    print "El sistema esta ACTIVO (true funciona)!!!";
+}
+
+if inactivo {
+    print "Error: Esto no deberia imprimirse";
+} else {
+    print "El sistema detecto el FALSE correctamente!!!";
+}
+
+// Probando reasignacion
+let estado = false;
+estado = true;
+
+if estado {
+    print "La reasignacion de booleanos tambien funciona!";
+}
