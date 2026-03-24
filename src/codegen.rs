@@ -59,20 +59,67 @@ impl CodeGenerator {
         self.ir_code.push_str("declare i32 @printf(i8*, ...)\n");
         self.ir_code.push_str("declare i32 @sprintf(i8*, i8*, ...)\n\n");
 
-        // 🚀 NUEVO: 1. Filtrar y generar primero todas las Funciones definidas por el usuario
+        // 🚀 1. Primer barrido: Funciones y Structs (con sus métodos) antes del main
         for stmt in &programa.declaraciones {
-            if let Declaracion::Funcion { .. } = stmt {
-                self.generate_statement(stmt)?;
+            match stmt {
+                Declaracion::Funcion { .. } => {
+                    self.generate_statement(stmt)?;
+                }
+                Declaracion::Struct { nombre, campos, metodos } => {
+                    // a) Registramos la memoria del Struct
+                    let mut mapa_campos = HashMap::new();
+                    for (indice, (nombre_campo, _)) in campos.iter().enumerate() {
+                        mapa_campos.insert(nombre_campo.clone(), indice);
+                    }
+                    self.struct_info.insert(nombre.clone(), mapa_campos);
+
+                    // b) Generamos sus métodos en LLVM IR
+                    for metodo in metodos {
+                        if let Declaracion::Funcion { nombre: fn_nombre, parametros, cuerpo, .. } = metodo {
+                            // Fusionamos los nombres (ej: Jugador_atacar)
+                            let nombre_mangled = format!("{}_{}", nombre, fn_nombre);
+
+                            // 🪄 TRUCO DE POO: El primer parámetro invisible es 'this' (puntero i64*)
+                            let mut params_ir = vec!["i64* %this".to_string()];
+                            for (param_nombre, _) in parametros {
+                                params_ir.push(format!("i64 %{}", param_nombre));
+                            }
+                            let signature = params_ir.join(", ");
+
+                            self.ir_code.push_str(&format!("define i64 @{}({}) {{\n", nombre_mangled, signature));
+                            self.ir_code.push_str("entry:\n");
+
+                            let previous_scope = self.current_scope.clone();
+
+                            // Inyectamos la variable 'this' al diccionario local para poder usar `this.propiedad`
+                            self.current_scope.insert("this".to_string(), ("%this".to_string(), format!("{}*", nombre)));
+                            for (param_nombre, _) in parametros {
+                                self.current_scope.insert(param_nombre.clone(), (format!("%{}", param_nombre), "i64".to_string()));
+                            }
+
+                            let mut tiene_return = false;
+                            for s in cuerpo {
+                                self.generate_statement(s)?;
+                                if matches!(s, Declaracion::Return { .. }) { tiene_return = true; }
+                            }
+                            if !tiene_return { self.ir_code.push_str("  ret i64 0\n"); }
+                            self.ir_code.push_str("}\n\n");
+
+                            self.current_scope = previous_scope;
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
-        // 🚀 NUEVO: 2. Definición de la función main para las instrucciones globales
+        // 2. Definición de la función main...
         self.ir_code.push_str("\ndefine i32 @main() {\n");
         self.ir_code.push_str("entry:\n");
 
-        // 🚀 NUEVO: 3. Generar el cuerpo de main (saltando las funciones que ya generamos)
+        // 🚀 3. Generar cuerpo de main (Ignorando las Funciones y los Structs)
         for stmt in &programa.declaraciones {
-            if !matches!(stmt, Declaracion::Funcion { .. }) {
+            if !matches!(stmt, Declaracion::Funcion { .. } | Declaracion::Struct { .. }) {
                 self.generate_statement(stmt)?;
             }
         }
@@ -93,15 +140,6 @@ impl CodeGenerator {
                 self.current_scope.insert(nombre.clone(), (reg, tipo));
             }
 
-            // --- NUEVO: REGISTRAR UN STRUCT ---
-            Declaracion::Struct { nombre, campos, .. } => {
-                let mut mapa_campos = HashMap::new();
-                // Le asignamos un índice numérico a cada campo (0, 1, 2...)
-                for (indice, (nombre_campo, _tipo)) in campos.iter().enumerate() {
-                    mapa_campos.insert(nombre_campo.clone(), indice);
-                }
-                self.struct_info.insert(nombre.clone(), mapa_campos);
-            }
 
             // --- NUEVO: MODIFICAR UNA PROPIEDAD (ej: heroe.vida = 100) ---
             Declaracion::ReasignacionPropiedad { objeto, propiedad, valor } => {
@@ -188,6 +226,22 @@ impl CodeGenerator {
                 let args_str = args_ir.join(", ");
                 self.ir_code.push_str(&format!("  call i64 @{}({})\n", nombre, args_str));
             }
+            // --- NUEVO: LLAMAR MÉTODO DE UN OBJETO ---
+            Declaracion::LlamadaMetodoSuelta { objeto, metodo, argumentos } => {
+                // 1. Obtenemos la dirección del objeto en memoria
+                let (obj_reg, obj_tipo) = self.generate_expr(objeto)?;
+                let nombre_struct = obj_tipo.trim_end_matches('*');
+                let nombre_mangled = format!("{}_{}", nombre_struct, metodo);
+
+                // 2. El primer argumento que mandamos siempre es el objeto mismo ('this')
+                let mut args_ir = vec![format!("i64* {}", obj_reg)];
+                for arg in argumentos {
+                    let (reg, _) = self.generate_expr(arg)?;
+                    args_ir.push(format!("i64 {}", reg));
+                }
+
+                self.ir_code.push_str(&format!("  call i64 @{}({})\n", nombre_mangled, args_ir.join(", ")));
+            }
 
             // --- ACTUALIZADO: PRINT INTELIGENTE ---
             Declaracion::Print { valor } => {
@@ -248,6 +302,67 @@ impl CodeGenerator {
                 self.ir_code.push_str(&format!("  br label %if.{}\n", merge_label));
                 
                 self.ir_code.push_str(&format!("if.{}:\n", merge_label));
+            }
+            // --- NUEVO: CICLO FOR (Iterar Arreglos) ---
+            Declaracion::For { variable, iterable, cuerpo } => {
+                // 1. Evaluamos la lista (ej: "edades")
+                let (iter_reg, iter_tipo) = self.generate_expr(iterable)?;
+
+                // 2. Extraemos la longitud con nuestro truco (ej: "i64*_3" -> 3)
+                let parts: Vec<&str> = iter_tipo.split('_').collect();
+                if parts.len() != 2 {
+                    return Err(format!("No se puede iterar sobre el tipo '{}'", iter_tipo));
+                }
+                let len: usize = parts[1].parse().unwrap_or(0);
+
+                // 3. Creamos un contador invisible (i = 0) en la RAM
+                let ptr_i = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = alloca i64\n", ptr_i));
+                self.ir_code.push_str(&format!("  store i64 0, i64* {}\n", ptr_i));
+
+                // 4. Etiquetas (Labels) de LLVM para los saltos condicionales
+                let loop_cond = self.var_counter;
+                let loop_body = self.var_counter + 1;
+                let loop_end = self.var_counter + 2;
+                self.var_counter += 3;
+
+                self.ir_code.push_str(&format!("  br label %for.cond.{}\n", loop_cond));
+
+                // --- CONDICIÓN (i < len) ---
+                self.ir_code.push_str(&format!("for.cond.{}:\n", loop_cond));
+                let val_i = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = load i64, i64* {}\n", val_i, ptr_i));
+                let cmp_reg = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = icmp slt i64 {}, {}\n", cmp_reg, val_i, len));
+                self.ir_code.push_str(&format!("  br i1 {}, label %for.body.{}, label %for.end.{}\n", cmp_reg, loop_body, loop_end));
+
+                // --- CUERPO DEL FOR ---
+                self.ir_code.push_str(&format!("for.body.{}:\n", loop_body));
+
+                // Extraemos lista[i] de la memoria
+                let ptr_elemento = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = getelementptr inbounds i64, i64* {}, i64 {}\n", ptr_elemento, iter_reg, val_i));
+                let val_elemento = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = load i64, i64* {}\n", val_elemento, ptr_elemento));
+
+                // Guardamos el elemento en el Scope local (ej: la variable 'elemento' de Kura)
+                let previous_scope = self.current_scope.clone();
+                self.current_scope.insert(variable.clone(), (val_elemento, "i64".to_string()));
+
+                // Ejecutamos las instrucciones del usuario
+                for stmt in cuerpo {
+                    self.generate_statement(stmt)?;
+                }
+
+                // Restauramos el scope y sumamos 1 al contador (i = i + 1)
+                self.current_scope = previous_scope;
+                let next_i = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = add i64 {}, 1\n", next_i, val_i));
+                self.ir_code.push_str(&format!("  store i64 {}, i64* {}\n", next_i, ptr_i));
+                self.ir_code.push_str(&format!("  br label %for.cond.{}\n", loop_cond));
+
+                // --- FIN DEL CICLO ---
+                self.ir_code.push_str(&format!("for.end.{}:\n", loop_end));
             }
             Declaracion::While { condicion, cuerpo } => {
                 let loop_label = self.var_counter;
@@ -354,7 +469,7 @@ impl CodeGenerator {
                 }
 
                 // Devolvemos el puntero del arreglo y le decimos a Kura que es un "i64*" (Puntero a números)
-                Ok((arr_ptr, "i64*".to_string()))
+                Ok((arr_ptr, format!("i64*_{}", len)))
             }
             // --- NUEVO: LEER DE UN ARREGLO ---
             Expresion::Indice { estructura, indice } => {
@@ -385,18 +500,17 @@ impl CodeGenerator {
             Expresion::Llamada { nombre, argumentos } => {
 
                 if nombre == "reemplazar" && argumentos.len() == 3 {
-                    let (arr_reg, _) = self.generate_expr(&argumentos[0])?;
+                    // 🚀 AÑADIR: extraemos arr_tipo aquí
+                    let (arr_reg, arr_tipo) = self.generate_expr(&argumentos[0])?;
                     let (idx_reg, _) = self.generate_expr(&argumentos[1])?;
                     let (val_reg, _) = self.generate_expr(&argumentos[2])?;
 
                     let elem_ptr = self.new_reg();
-                    // Buscamos la memoria
                     self.ir_code.push_str(&format!("  {} = getelementptr inbounds i64, i64* {}, i64 {}\n", elem_ptr, arr_reg, idx_reg));
-                    // Sobrescribimos con el nuevo valor
                     self.ir_code.push_str(&format!("  store i64 {}, i64* {}\n", val_reg, elem_ptr));
 
-                    // Devolvemos el mismo puntero para que Kura no pierda la referencia original
-                    return Ok((arr_reg, "i64*".to_string()));
+                    // 🚀 CAMBIAR: Retornamos el tipo original intacto
+                    return Ok((arr_reg, arr_tipo));
                 }
                 let mut args_ir = Vec::new();
 
@@ -434,6 +548,23 @@ impl CodeGenerator {
 
                 // Retornamos el registro y le avisamos al compilador que es tipo puntero (i8*)
                 Ok((ptr_reg, "i8*".to_string()))
+            }
+            // --- NUEVO: LLAMAR MÉTODO Y OBTENER RESULTADO ---
+            Expresion::LlamadaMetodo { objeto, metodo, argumentos } => {
+                let (obj_reg, obj_tipo) = self.generate_expr(objeto)?;
+                let nombre_struct = obj_tipo.trim_end_matches('*');
+                let nombre_mangled = format!("{}_{}", nombre_struct, metodo);
+
+                let mut args_ir = vec![format!("i64* {}", obj_reg)];
+                for arg in argumentos {
+                    let (reg, _) = self.generate_expr(arg)?;
+                    args_ir.push(format!("i64 {}", reg));
+                }
+
+                let result_reg = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = call i64 @{}({})\n", result_reg, nombre_mangled, args_ir.join(", ")));
+
+                Ok((result_reg, "i64".to_string()))
             }
             Expresion::Operacion { izquierda, operador, derecha } => {
                 let (left_reg, _) = self.generate_expr(izquierda)?;

@@ -14,6 +14,7 @@ pub struct Parser {
     pub linea_actual: usize,    // <-- NUEVO
     pub col_actual: usize,
     pub lineas_codigo: Vec<String>,
+    pub prohibir_structs: bool,
 }
 
 impl Parser {
@@ -34,7 +35,8 @@ impl Parser {
             token_siguiente: siguiente,
             linea_siguiente: l_sig,
             col_siguiente: c_sig,
-            lineas_codigo: fuente.lines().map(|l| l.to_string()).collect()
+            lineas_codigo: fuente.lines().map(|l| l.to_string()).collect(),
+            prohibir_structs: false, // 🚀 NUEVO: Por defecto permitimos Structs
         }
     }
 
@@ -404,7 +406,10 @@ impl Parser {
 
     fn parse_if(&mut self) -> Option<Declaracion> {
         self.avanzar(); // Pasamos el 'if'
+
+        self.prohibir_structs = true;
         let condicion = self.parse_expresion()?;
+        self.prohibir_structs = false;
 
         if self.token_actual != Token::LlaveAbre { return None; }
         self.avanzar(); // Pasamos '{'
@@ -445,7 +450,11 @@ impl Parser {
 
     fn parse_while(&mut self) -> Option<Declaracion> {
         self.avanzar();
+
+        self.prohibir_structs = true;
         let condicion = self.parse_expresion()?;
+        self.prohibir_structs = false;
+
         if self.token_actual != Token::LlaveAbre { return None; }
         self.avanzar();
         let mut cuerpo = Vec::new();
@@ -465,6 +474,9 @@ impl Parser {
         self.avanzar();
         if self.token_actual != Token::In { return None; }
         self.avanzar();
+        self.prohibir_structs = true;
+        let iterable = self.parse_expresion()?;
+        self.prohibir_structs = false;
         let iterable = self.parse_expresion()?;
         if self.token_actual != Token::LlaveAbre { return None; }
         self.avanzar();
@@ -848,8 +860,8 @@ impl Parser {
 
             Token::Identificador(nom) => {
                 let id = nom.clone();
-                // Si sigue una '{', es una instancia de Struct: Persona { ... }parse_instancia_struct
-                if self.token_siguiente == Token::LlaveAbre {
+                // 🚀 NUEVO: Solo creamos el Struct si NO está prohibido temporalmente
+                if self.token_siguiente == Token::LlaveAbre && !self.prohibir_structs {
                     self.avanzar();
                     self.parse_instancia_struct(id)?
                 } else {
