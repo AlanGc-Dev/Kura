@@ -25,7 +25,8 @@ pub enum Token {
     Or,
     As,     // 🚀 NUEVO: import X as Y
     New,    // 🚀 NUEVO: allocate memory
-    Null,   // 🚀 NUEVO: null pointer
+    Delete, // 🚀 NUEVO: deallocate memory (FALTABA ESTE)
+    Null,   // 🚀 NUEVO: null pointer // 🚀 NUEVO: null pointer
 
     Identificador(String),
     Tipo(String),

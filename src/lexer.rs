@@ -235,9 +235,10 @@ impl Lexer {
             "import" => Token::Import,
             "export" => Token::Export,  // 🚀 NUEVO
             "from" => Token::From,
-            "as" => Token::As,          // 🚀 NUEVO
-            "new" => Token::New,        // 🚀 NUEVO: allocate memory
-            "null" => Token::Null,      // 🚀 NUEVO: null pointer
+            "as" => Token::As,
+            "new" => Token::New,
+            "delete" => Token::Delete,  // 🚀 NUEVO
+            "null" => Token::Null,     // 🚀 NUEVO: null pointer
             "break" => Token::Break,
             "int" | "float" | "str" | "bool" | "Arreglo" | "void" => Token::Tipo(palabra),
             _ => Token::Identificador(palabra),

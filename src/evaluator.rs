@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use crate::ast::{Programa, Declaracion, Expresion, CasoMatch, Pattern, VarianteEnum};
 use crate::token::Token;
 use crate::types::TipoKura;
+use std::fs;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -416,6 +417,15 @@ fn evaluar_declaracion(declaracion: &Declaracion, entorno: Rc<RefCell<Entorno>>)
             evaluar_expresion(&Expresion::LlamadaMetodo { objeto: objeto.clone(), metodo: metodo.to_string(), argumentos: argumentos.to_vec() }, Rc::clone(&entorno));
             ObjetoKura::Nulo
         }
+        Declaracion::Delete { valor } => {
+            // Evaluamos la expresión para obtener el puntero
+            let obj = evaluar_expresion(valor, entorno);
+            // Si es un puntero (Rc<RefCell>), vaciamos su contenido en el intérprete
+            if let ObjetoKura::Puntero(ref_cell) = obj {
+                *ref_cell.borrow_mut() = ObjetoKura::Nulo;
+            }
+            ObjetoKura::Nulo
+        }
         Declaracion::ReasignacionPropiedad { objeto, propiedad, valor } => {
             let valor_evaluado = evaluar_expresion(&valor, Rc::clone(&entorno));
             if let Some(ObjetoKura::InstanciaStruct { campos, .. }) = entorno.borrow().obtener(&objeto) {
@@ -441,6 +451,32 @@ fn evaluar_expresion(expresion: &Expresion, entorno: Rc<RefCell<Entorno>>) -> Ob
                 evaluados.push(evaluar_expresion(&el, Rc::clone(&entorno)));
             }
             ObjetoKura::Arreglo(evaluados)
+        }
+        Expresion::Nuevo { tipo: _ } => {
+            // En el intérprete, "malloc" se simula envolviendo un Nulo inicial
+            // en un contador de referencias Rc con mutabilidad interior RefCell
+            use std::rc::Rc;
+            use std::cell::RefCell;
+            ObjetoKura::Puntero(Rc::new(RefCell::new(ObjetoKura::Nulo)))
+        }
+        Expresion::Nulo => {
+            ObjetoKura::Nulo
+        }
+        Expresion::Referencia(expr) => {
+            use std::rc::Rc;
+            use std::cell::RefCell;
+            let obj = evaluar_expresion(expr, entorno);
+            // Envuelve el objeto actual en un puntero virtual
+            ObjetoKura::Puntero(Rc::new(RefCell::new(obj)))
+        }
+        Expresion::Desreferencia(expr) => {
+            let obj = evaluar_expresion(expr, entorno);
+            if let ObjetoKura::Puntero(ref_cell) = obj {
+                ref_cell.borrow().clone() // Extraemos el valor clonado de la memoria
+            } else {
+                println!("Error de Ejecución: Intentando desreferenciar un valor que no es un Puntero.");
+                ObjetoKura::Nulo
+            }
         }
         Expresion::LlamadaMetodo { objeto, metodo, argumentos } => {
             let obj_evaluado = evaluar_expresion(&*objeto, Rc::clone(&entorno));
@@ -566,6 +602,41 @@ fn evaluar_expresion(expresion: &Expresion, entorno: Rc<RefCell<Entorno>>) -> Ob
             ObjetoKura::Diccionario(mapa)
         }
         Expresion::Llamada { nombre, argumentos } => {
+
+            if nombre == "read_file" && argumentos.len() == 1 {
+                let arg = evaluar_expresion(&argumentos[0], entorno);
+                if let ObjetoKura::Cadena(ruta) = arg {
+                    match fs::read_to_string(&ruta) {
+                        Ok(contenido) => return ObjetoKura::Cadena(contenido),
+                        Err(_) => {
+                            println!("Error de Ejecución: No se pudo leer el archivo '{}'", ruta);
+                            return ObjetoKura::Nulo;
+                        }
+                    }
+                } else {
+                    println!("Error de Ejecución: read_file requiere una cadena de texto como ruta.");
+                    return ObjetoKura::Nulo;
+                }
+            }
+
+            if nombre == "write_file" && argumentos.len() == 2 {
+                // 🚀 AGREGAMOS .clone() A LOS ENTORNOS
+                let arg_ruta = evaluar_expresion(&argumentos[0], entorno.clone());
+                let arg_contenido = evaluar_expresion(&argumentos[1], entorno.clone());
+
+                if let (ObjetoKura::Cadena(ruta), ObjetoKura::Cadena(contenido)) = (arg_ruta, arg_contenido) {
+                    match fs::write(&ruta, contenido) {
+                        Ok(_) => return ObjetoKura::Booleano(true), // Éxito
+                        Err(_) => {
+                            println!("Error de Ejecución: No se pudo escribir en el archivo '{}'", ruta);
+                            return ObjetoKura::Booleano(false);
+                        }
+                    }
+                } else {
+                    println!("Error de Ejecución: write_file requiere dos cadenas (ruta y contenido).");
+                    return ObjetoKura::Nulo;
+                }
+            }
 
             if nombre == "len" && argumentos.len() == 1 {
                 let arg_eval = evaluar_expresion(&argumentos[0], Rc::clone(&entorno));
@@ -709,6 +780,14 @@ pub fn imprimir_objeto(obj: &ObjetoKura) {
                 if i < arr.len() - 1 { print!(", "); }
             }
             print!("]");
+        }
+        ObjetoKura::Puntero(ref_cell) => {
+            print!("Puntero -> ");
+            // Llamamos recursivamente a la misma función para imprimir lo que hay dentro!
+            imprimir_objeto(&*ref_cell.borrow());
+        }
+        ObjetoKura::Nulo => {
+            print!("null");
         }
         ObjetoKura::FuncionNativa(_) => print!("[Funcion Nativa de Rust]"),
         ObjetoKura::Nulo => print!("null"),

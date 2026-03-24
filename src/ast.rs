@@ -84,6 +84,9 @@ pub enum Declaracion {
         propiedad: String,
         valor: Expresion,
     },
+    Delete {                    // 🚀 NUEVO: Para liberar memoria manual
+        valor: Expresion,
+    },
 }
 
 // Estructura para variantes de enum

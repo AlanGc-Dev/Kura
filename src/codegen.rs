@@ -147,6 +147,61 @@ impl CodeGenerator {
         self.ir_code.push_str("declare i8* @kura_dict_create(i64)\n");
         self.ir_code.push_str("declare i64 @kura_dict_len(i8*)\n");
         self.ir_code.push_str("declare void @kura_dict_free(i8*)\n\n");
+        // ... (tus otras declaraciones como malloc, free, memcpy, etc.)
+        self.ir_code.push_str("declare i64 @strlen(i8*)\n");
+
+        // 🚀 NUEVO: Declaraciones de I/O de la Standard Library de C
+        self.ir_code.push_str("declare i8* @fopen(i8*, i8*)\n");
+        self.ir_code.push_str("declare i32 @fclose(i8*)\n");
+        self.ir_code.push_str("declare i64 @fread(i8*, i64, i64, i8*)\n");
+        self.ir_code.push_str("declare i64 @fwrite(i8*, i64, i64, i8*)\n");
+        self.ir_code.push_str("declare i32 @fseek(i8*, i64, i32)\n");
+        self.ir_code.push_str("declare i64 @ftell(i8*)\n");
+        self.ir_code.push_str("declare void @rewind(i8*)\n");
+
+        self.ir_code.push_str(r#"
+@.str.mode.r = private unnamed_addr constant [2 x i8] c"r\00", align 1
+@.str.mode.w = private unnamed_addr constant [2 x i8] c"w\00", align 1
+
+; --- HELPER NATIVO: write_file ---
+define i64 @kura_write_file(i8* %path, i8* %content) {
+entry:
+  %mode = getelementptr inbounds [2 x i8], [2 x i8]* @.str.mode.w, i32 0, i32 0
+  %file = call i8* @fopen(i8* %path, i8* %mode)
+  %cmp = icmp eq i8* %file, null
+  br i1 %cmp, label %fail, label %write
+write:
+  %len = call i64 @strlen(i8* %content)
+  %written = call i64 @fwrite(i8* %content, i64 1, i64 %len, i8* %file)
+  call i32 @fclose(i8* %file)
+  ret i64 1
+fail:
+  ret i64 0
+}
+
+; --- HELPER NATIVO: read_file ---
+define i8* @kura_read_file(i8* %path) {
+entry:
+  %mode = getelementptr inbounds [2 x i8], [2 x i8]* @.str.mode.r, i32 0, i32 0
+  %file = call i8* @fopen(i8* %path, i8* %mode)
+  %cmp = icmp eq i8* %file, null
+  br i1 %cmp, label %fail, label %read
+read:
+  call i32 @fseek(i8* %file, i64 0, i32 2)
+  %size = call i64 @ftell(i8* %file)
+  call void @rewind(i8* %file)
+  %buf_size = add i64 %size, 1
+  %buf = call i8* @malloc(i64 %buf_size)
+  call i64 @fread(i8* %buf, i64 1, i64 %size, i8* %file)
+  %null_ptr = getelementptr inbounds i8, i8* %buf, i64 %size
+  store i8 0, i8* %null_ptr
+  call i32 @fclose(i8* %file)
+  ret i8* %buf
+fail:
+  ret i8* null
+}
+"#);
+        self.ir_code.push_str("\n");
 
         // 🚀 1. Primer barrido: Funciones y Structs (con sus métodos) antes del main
         for stmt in &programa.declaraciones {
@@ -570,6 +625,27 @@ impl CodeGenerator {
                 // 3. Etiqueta final para continuar el programa
                 self.ir_code.push_str(&format!("{}:\n", end_label));
             }
+            Declaracion::Delete { valor } => {
+                let (ptr_reg, tipo) = self.generate_expr(valor)?;
+
+                // LLVM necesita su tipo interno real, no el nombre del Struct en Kura.
+                // Convertimos cualquier "NombreStruct*" a "i64*" para LLVM.
+                let llvm_type = if !tipo.starts_with('i') && tipo.ends_with('*') {
+                    "i64*"
+                } else {
+                    &tipo
+                };
+
+                // Si ya es un i8* (como una cadena pura), podemos liberarlo directo
+                if llvm_type == "i8*" {
+                    self.ir_code.push_str(&format!("  call void @free(i8* {})\n", ptr_reg));
+                } else {
+                    // Si es un i64* (Arreglo o Struct), lo convertimos a i8* y lo liberamos
+                    let casted_ptr = self.new_reg();
+                    self.ir_code.push_str(&format!("  {} = bitcast {} {} to i8*\n", casted_ptr, llvm_type, ptr_reg));
+                    self.ir_code.push_str(&format!("  call void @free(i8* {})\n", casted_ptr));
+                }
+            }
             Declaracion::While { condicion, cuerpo } => {
                 let loop_label = self.var_counter;
                 let body_label = self.var_counter + 1;
@@ -643,6 +719,55 @@ impl CodeGenerator {
 
                 // Devolvemos el puntero y lo marcamos con el nombre del struct
                 Ok((struct_ptr, format!("{}*", nombre)))
+            }
+            // --- GESTIÓN DE HEAP: new Type ---
+            Expresion::Nuevo { tipo } => {
+                // 1. Calculamos el tamaño en bytes (64 bits = 8 bytes por propiedad)
+                let mut size_bytes = 8; // Tamaño mínimo por defecto
+                if let Some(mapa_campos) = self.struct_info.get(tipo) {
+                    size_bytes = mapa_campos.len() * 8;
+                }
+
+                // 2. Pedimos memoria dinámica al OS
+                let raw_ptr = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = call i8* @malloc(i64 {})\n", raw_ptr, size_bytes));
+
+                // 3. Convertimos el i8* vacío al tipo estructurado de Kura (ej: i64*)
+                let typed_ptr = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = bitcast i8* {} to i64*\n", typed_ptr, raw_ptr));
+
+                Ok((typed_ptr, format!("{}*", tipo)))
+            }
+
+            // --- GESTIÓN DE HEAP: null ---
+            Expresion::Nulo => {
+                Ok(("null".to_string(), "i64*".to_string()))
+            }
+
+            // --- GESTIÓN DE HEAP: &var (Referencia) ---
+            Expresion::Referencia(expr) => {
+                if let Expresion::Identificador(name) = &**expr {
+                    if let Some((reg, tipo)) = self.current_scope.get(name).cloned() {
+                        // En LLVM de Kura, las variables mutables (tipo i64*) YA son punteros a la RAM
+                        // Así que devolver el registro original es básicamente pasar la dirección
+                        Ok((reg, tipo))
+                    } else {
+                        Err(format!("Variable '{}' no encontrada para extraer referencia", name))
+                    }
+                } else {
+                    Err("Solo se pueden obtener referencias de identificadores (variables)".to_string())
+                }
+            }
+
+            // --- GESTIÓN DE HEAP: *ptr (Desreferencia) ---
+            Expresion::Desreferencia(expr) => {
+                let (ptr_reg, _) = self.generate_expr(expr)?;
+
+                let val_reg = self.new_reg();
+                // Leemos el valor en la dirección de memoria apuntada
+                self.ir_code.push_str(&format!("  {} = load i64, i64* {}\n", val_reg, ptr_reg));
+
+                Ok((val_reg, "i64".to_string()))
             }
 
             // --- NUEVO: LEER UNA PROPIEDAD (ej: print heroe.vida) ---
@@ -776,6 +901,24 @@ impl CodeGenerator {
                         self.ir_code.push_str(&format!("  ; values from dictionary: {}\n", dict_reg));
                         
                         return Ok((dict_reg, "i64*".to_string()));
+                    }
+                    // 🚀 NUEVO: Mapeo de I/O al compilador nativo
+                    "read_file" if argumentos.len() == 1 => {
+                        let (ruta_reg, _) = self.generate_expr(&argumentos[0])?;
+                        let result_reg = self.new_reg();
+                        self.ir_code.push_str(&format!("  {} = call i8* @kura_read_file(i8* {})\n", result_reg, ruta_reg));
+
+                        // Retornamos la cadena leída (que es un puntero a caracteres)
+                        return Ok((result_reg, "i8*".to_string()));
+                    }
+                    "write_file" if argumentos.len() == 2 => {
+                        let (ruta_reg, _) = self.generate_expr(&argumentos[0])?;
+                        let (cont_reg, _) = self.generate_expr(&argumentos[1])?;
+                        let result_reg = self.new_reg();
+                        self.ir_code.push_str(&format!("  {} = call i64 @kura_write_file(i8* {}, i8* {})\n", result_reg, ruta_reg, cont_reg));
+
+                        // Retornamos un booleano (que en LLVM de Kura es i64: 1=True, 0=False)
+                        return Ok((result_reg, "i64".to_string()));
                     }
                     _ => {} // Continúar con llamadas a funciones normales
                 }

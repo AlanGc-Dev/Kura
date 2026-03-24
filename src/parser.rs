@@ -119,6 +119,7 @@ impl Parser {
             Token::Import => self.parse_declaracion_import(),// <-- LEEMOS FUNCIONES
             Token::Export => self.parse_export(),  // 🚀 NUEVO: Export declarations
             Token::Return => self.parse_return(),    // <-- LEEMOS RETORNOS
+            Token::Delete => self.parse_delete(),
             Token::Identificador(_) => {
                 // Miramos qué viene después del nombre
                 match self.token_siguiente {
@@ -151,6 +152,12 @@ impl Parser {
         self.avanzar(); // pasamos 'break'
         if self.token_actual == Token::PuntoYComa { self.avanzar(); }
         Some(Declaracion::Break)
+    }
+    fn parse_delete(&mut self) -> Option<Declaracion> {
+        self.avanzar(); // pasamos 'delete'
+        let valor = self.parse_expresion()?;
+        if self.token_actual == Token::PuntoYComa { self.avanzar(); }
+        Some(Declaracion::Delete { valor })
     }
 
     fn parse_enum(&mut self) -> Option<Declaracion> {

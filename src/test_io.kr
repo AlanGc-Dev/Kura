@@ -1,0 +1,15 @@
+// 1. Escribir un archivo
+let exito = write_file("saludo.txt", "Hola desde el interprete de KURA!\nBootstrapping en progreso...");
+
+if exito {
+    print "Archivo creado correctamente.";
+} else {
+    print "Fallo al crear el archivo.";
+}
+
+// 2. Leer el archivo recién creado
+let contenido = read_file("saludo.txt");
+
+print "--- CONTENIDO DEL ARCHIVO ---";
+print contenido;
+print "-----------------------------";
