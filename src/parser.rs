@@ -117,6 +117,7 @@ impl Parser {
             Token::Struct => self.parse_struct(),
             Token::Match => self.parse_match(),
             Token::Import => self.parse_declaracion_import(),// <-- LEEMOS FUNCIONES
+            Token::Export => self.parse_export(),  // 🚀 NUEVO: Export declarations
             Token::Return => self.parse_return(),    // <-- LEEMOS RETORNOS
             Token::Identificador(_) => {
                 // Miramos qué viene después del nombre
@@ -203,34 +204,35 @@ impl Parser {
         self.avanzar(); // pasamos 'match'
         let valor = self.parse_expresion()?;
         if self.token_actual != Token::LlaveAbre { return None; }
-        self.avanzar();
+        self.avanzar(); // pasamos '{'
 
         let mut casos = Vec::new();
         while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
-            // Parsear patrón
+            // 1. Parsear el patrón (ej: exito, error, _)
             let patron = self.parse_pattern()?;
-            if self.token_actual != Token::FlechaGrande { return None; }
-            self.avanzar();
 
-            // Parsear cuerpo del caso
+            // 2. Esperar obligatoriamente '=>'
+            if self.token_actual != Token::FlechaGrande {
+                self.reportar_error("INSTRUCCION_DESCONOCIDA", &self.token_actual);
+                return None;
+            }
+            self.avanzar(); // pasamos '=>'
+
+            // 3. Parsear el cuerpo (debe estar entre llaves '{ }' para evitar ambigüedad)
+            if self.token_actual != Token::LlaveAbre { return None; }
+            self.avanzar(); // pasamos '{'
+
             let mut cuerpo = Vec::new();
-            loop {
-                // Detectar fin del caso: coma, siguiente variante, o }
-                if self.token_actual == Token::Coma || 
-                   self.token_actual == Token::LlaveCierra ||
-                   (matches!(&self.token_actual, Token::Identificador(_)) && 
-                    self.token_siguiente != Token::Asignacion) {
-                    break;
-                }
+            while self.token_actual != Token::LlaveCierra && self.token_actual != Token::FinDeArchivo {
                 if let Some(decl) = self.parse_declaracion() {
                     cuerpo.push(decl);
-                } else {
-                    break;
                 }
             }
+            self.avanzar(); // pasamos '}'
 
             casos.push(CasoMatch { patron, cuerpo });
-            
+
+            // La coma entre casos es opcional
             if self.token_actual == Token::Coma { self.avanzar(); }
         }
 
@@ -328,6 +330,30 @@ impl Parser {
         // ¡Si todo salió bien, devolvemos el Nodo creado!
         Some(Declaracion::Importar { elementos, archivo })
     }
+
+    fn parse_export(&mut self) -> Option<Declaracion> {
+        // 🚀 NUEVO: export nombre; (simple export by name)
+        // Más adelante: export fn nombre { ... } o export struct nombre { ... }
+        self.avanzar(); // Saltamos 'export'
+        
+        let nombre = match &self.token_actual {
+            Token::Identificador(n) => n.clone(),
+            _ => return None,
+        };
+        
+        self.avanzar();
+        
+        // Esperamos punto y coma (opcional)
+        if self.token_actual == Token::PuntoYComa {
+            self.avanzar();
+        }
+        
+        Some(Declaracion::Exportar {
+            nombre,
+            es_modulo_default: false,
+        })
+    }
+
     fn parse_declaracion_let(&mut self) -> Option<Declaracion> {
         self.avanzar(); // Pasamos 'let'
         let mut es_mut = false;
@@ -851,12 +877,39 @@ impl Parser {
     fn parse_expresion_primaria(&mut self) -> Option<Expresion> {
         let mut izquierda = match &self.token_actual {
             Token::Entero(n) => { let e = Expresion::Entero(*n); self.avanzar(); e },
+            Token::Flotante(f) => { let e = Expresion::Flotante(*f); self.avanzar(); e },  // 🚀 NUEVO
             Token::Cadena(t) => { let e = Expresion::Cadena(t.clone()); self.avanzar(); e },
             Token::True => { self.avanzar(); Expresion::Booleano(true) },
             Token::False => { self.avanzar(); Expresion::Booleano(false) },
+            Token::Null => { self.avanzar(); Expresion::Nulo },  // 🚀 NUEVO: null literal
             Token::LlaveAbre => self.parse_diccionario()?,
             Token::CorcheteAbre => self.parse_arreglo()?,
-
+            Token::New => {  // 🚀 NUEVO: new Type
+                self.avanzar();
+                if let Token::Identificador(tipo) = &self.token_actual {
+                    let tipo_str = tipo.clone();
+                    self.avanzar();
+                    Expresion::Nuevo { tipo: tipo_str }
+                } else {
+                    return None;
+                }
+            },
+            Token::Multiplicacion => {  // 🚀 NUEVO: *ptr (dereference)
+                self.avanzar();
+                if let Some(expr) = self.parse_expresion_primaria() {
+                    Expresion::Desreferencia(Box::new(expr))
+                } else {
+                    return None;
+                }
+            },
+            Token::Ampersand => {  // 🚀 NUEVO: &var (reference) - NOTA: Ampersand necesita ser agregado a Token
+                self.avanzar();
+                if let Some(expr) = self.parse_expresion_primaria() {
+                    Expresion::Referencia(Box::new(expr))
+                } else {
+                    return None;
+                }
+            },
             Token::Identificador(nom) => {
                 let id = nom.clone();
                 // 🚀 NUEVO: Solo creamos el Struct si NO está prohibido temporalmente

@@ -62,6 +62,10 @@ pub enum Declaracion {
         elementos: Vec<String>, // Guarda ["funcion1", "variable2"]
         archivo: String,        // Guarda "archivo.kr"
     },
+    Exportar {                  // 🚀 NUEVO: export fn / export const / export struct
+        nombre: String,         // Nombre de lo que se exporta
+        es_modulo_default: bool, // export default
+    },
     Enum {                      // <-- NUEVO: Definición de enum
         nombre: String,
         variantes: Vec<VarianteEnum>,
@@ -112,6 +116,7 @@ pub enum Pattern {
 #[derive(Debug, Clone)] // Añadimos Clone para facilitar el manejo
 pub enum Expresion {
     Entero(i64),
+    Flotante(f64),  // 🚀 NUEVO: Soporte para flotantes
     Identificador(String),
     Booleano(bool),
     Cadena(String),
@@ -148,6 +153,10 @@ pub enum Expresion {
         metodo: String,
         argumentos: Vec<Expresion>,
     },
-
-
+    Nuevo {             // 🚀 NUEVO: new Type
+        tipo: String,
+    },
+    Desreferencia(Box<Expresion>),  // 🚀 NUEVO: *ptr
+    Referencia(Box<Expresion>),     // 🚀 NUEVO: &var
+    Nulo,               // 🚀 NUEVO: null literal
 }

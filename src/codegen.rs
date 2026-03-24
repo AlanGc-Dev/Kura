@@ -6,8 +6,52 @@ use crate::ast::{Programa, Declaracion, Expresion, Pattern};
 use crate::token::Token;
 
 /// CodeGenerator genera IR LLVM que se compila a código máquina nativo
-/// Backend: clang (from LLVM) → object → lld-link → executable
-/// Soporta optimizaciones en tiempo de compilación
+/// Backend: clang (from LLVM) → object → lld-link/ld → executable
+/// Soporta optimizaciones en tiempo de compilación y compilación cruzada
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CompilationTarget {
+    WindowsX86_64,    // x86_64-pc-windows-msvc
+    LinuxX86_64,      // x86_64-unknown-linux-gnu
+    LinuxARM64,       // aarch64-unknown-linux-gnu
+    MacOSX86_64,      // x86_64-apple-darwin
+    MacOSARM64,       // aarch64-apple-darwin (Apple Silicon)
+}
+
+impl CompilationTarget {
+    pub fn as_triple(&self) -> &'static str {
+        match self {
+            Self::WindowsX86_64 => "x86_64-pc-windows-msvc",
+            Self::LinuxX86_64 => "x86_64-unknown-linux-gnu",
+            Self::LinuxARM64 => "aarch64-unknown-linux-gnu",
+            Self::MacOSX86_64 => "x86_64-apple-darwin",
+            Self::MacOSARM64 => "aarch64-apple-darwin",
+        }
+    }
+
+    pub fn linker_command(&self) -> &'static str {
+        match self {
+            Self::WindowsX86_64 => "lld-link",
+            Self::LinuxX86_64 | Self::LinuxARM64 => "ld.lld",
+            Self::MacOSX86_64 | Self::MacOSARM64 => "ld64.lld",
+        }
+    }
+
+    pub fn from_string(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "windows-x86_64" | "windows" | "win" | "x86_64-pc-windows-msvc" => Some(Self::WindowsX86_64),
+            "linux-x86_64" | "linux" | "x86_64-unknown-linux-gnu" => Some(Self::LinuxX86_64),
+            "linux-arm64" | "linux-arm" | "aarch64-unknown-linux-gnu" => Some(Self::LinuxARM64),
+            "macos-x86_64" | "macos" | "x86_64-apple-darwin" => Some(Self::MacOSX86_64),
+            "macos-arm64" | "macos-arm" | "aarch64-apple-darwin" => Some(Self::MacOSARM64),
+            _ => None,
+        }
+    }
+
+    pub fn requires_libc(&self) -> bool {
+        matches!(self, Self::LinuxX86_64 | Self::LinuxARM64 | Self::MacOSX86_64 | Self::MacOSARM64)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum OptimizationLevel {
     None,      // -O0 (sin optimización)
@@ -23,6 +67,7 @@ pub struct CodeGenerator {
     // 🚀 NUEVO: Guarda (Nombre del Struct -> (Nombre del Campo -> Indice))
     struct_info: HashMap<String, HashMap<String, usize>>,
     opt_level: OptimizationLevel,
+    target: CompilationTarget,
 }
 
 impl CodeGenerator {
@@ -33,6 +78,7 @@ impl CodeGenerator {
             current_scope: HashMap::new(),
             struct_info: HashMap::new(),
             opt_level: OptimizationLevel::Balanced,
+            target: CompilationTarget::WindowsX86_64,
         })
     }
 
@@ -43,21 +89,64 @@ impl CodeGenerator {
             current_scope: HashMap::new(),
             struct_info: HashMap::new(),
             opt_level,
+            target: CompilationTarget::WindowsX86_64,
+        })
+    }
+
+    pub fn with_target(opt_level: OptimizationLevel, target: CompilationTarget) -> Result<Self, String> {
+        Ok(Self {
+            ir_code: String::new(),
+            var_counter: 0,
+            current_scope: HashMap::new(),
+            struct_info: HashMap::new(),
+            opt_level,
+            target,
         })
     }
 
     pub fn generate(&mut self, programa: Programa) -> Result<String, String> {
         println!("🎯 Generando LLVM IR textual...");
         println!("📋 Compilando {} declaraciones...", programa.declaraciones.len());
+        println!("🎯 Target: {}", self.target.as_triple());
 
-        // Encabezados de LLVM IR
+        // Encabezados de LLVM IR - usar target triple correcto
         self.ir_code.push_str("; LLVM IR generado por KURA\n");
-        self.ir_code.push_str("target triple = \"x86_64-pc-windows-gnu\"\n");
-        self.ir_code.push_str("target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"\n\n");
+        let target_triple = format!("target triple = \"{}\"\n", self.target.as_triple());
+        self.ir_code.push_str(&target_triple);
+        
+        // Data layout varía según el target
+        let data_layout = match self.target {
+            CompilationTarget::WindowsX86_64 => "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"\n",
+            CompilationTarget::LinuxX86_64 => "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"\n",
+            CompilationTarget::LinuxARM64 => "target datalayout = \"e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128\"\n",
+            CompilationTarget::MacOSX86_64 => "target datalayout = \"e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"\n",
+            CompilationTarget::MacOSARM64 => "target datalayout = \"e-m:o-i64:64-i128:128-n32:64-S128\"\n",
+        };
+        self.ir_code.push_str(data_layout);
+        self.ir_code.push_str("\n");
 
-        // Declaración de printf
+        // Declaración de funciones de C
         self.ir_code.push_str("declare i32 @printf(i8*, ...)\n");
-        self.ir_code.push_str("declare i32 @sprintf(i8*, i8*, ...)\n\n");
+        self.ir_code.push_str("declare i32 @sprintf(i8*, i8*, ...)\n");
+        
+        // 🚀 NUEVO: Declaraciones de runtime library (malloc, free, etc)
+        self.ir_code.push_str("declare i8* @malloc(i64)\n");
+        self.ir_code.push_str("declare void @free(i8*)\n");
+        self.ir_code.push_str("declare i8* @memcpy(i8*, i8*, i64)\n");
+        self.ir_code.push_str("declare i8* @memset(i8*, i32, i64)\n");
+        self.ir_code.push_str("declare i64 @strlen(i8*)\n");
+        self.ir_code.push_str("declare i8* @strcpy(i8*, i8*)\n");
+        self.ir_code.push_str("declare i8* @strcat(i8*, i8*)\n");
+        
+        // Funciones de la runtime library de KURA
+        self.ir_code.push_str("declare i8* @kura_array_create(i64, i64)\n");
+        self.ir_code.push_str("declare void @kura_array_push(i8*, i8*)\n");
+        self.ir_code.push_str("declare i8* @kura_array_get(i8*, i64)\n");
+        self.ir_code.push_str("declare i64 @kura_array_len(i8*)\n");
+        self.ir_code.push_str("declare void @kura_array_free(i8*)\n");
+        self.ir_code.push_str("declare i8* @kura_dict_create(i64)\n");
+        self.ir_code.push_str("declare i64 @kura_dict_len(i8*)\n");
+        self.ir_code.push_str("declare void @kura_dict_free(i8*)\n\n");
 
         // 🚀 1. Primer barrido: Funciones y Structs (con sus métodos) antes del main
         for stmt in &programa.declaraciones {
@@ -271,8 +360,20 @@ impl CodeGenerator {
                     self.ir_code.push_str(&format!("  {} = getelementptr inbounds [6 x i8], [6 x i8]* @.str.fmt.i64, i32 0, i32 0\n", ptr_reg));
                     self.ir_code.push_str(&format!("  call i32 (i8*, ...) @printf(i8* {}, i64 {})\n", ptr_reg, reg));
                 }
+                else if tipo == "double" {
+                    // 🚀 NUEVO: CASO 2: Imprimir un Número Flotante
+                    let format_str = "@.str.fmt.double = private unnamed_addr constant [6 x i8] c\"%lf\\0A\\00\", align 1\n";
+                    if !self.ir_code.contains("@.str.fmt.double") {
+                        let insert_pos = self.ir_code.find("declare i32 @printf").unwrap_or(0);
+                        self.ir_code.insert_str(insert_pos, format_str);
+                    }
+
+                    let ptr_reg = self.new_reg();
+                    self.ir_code.push_str(&format!("  {} = getelementptr inbounds [6 x i8], [6 x i8]* @.str.fmt.double, i32 0, i32 0\n", ptr_reg));
+                    self.ir_code.push_str(&format!("  call i32 (i8*, ...) @printf(i8* {}, double {})\n", ptr_reg, reg));
+                }
                 else if tipo == "i8*" {
-                    // CASO 2: Imprimir una Cadena de Texto
+                    // CASO 3: Imprimir una Cadena de Texto
                     let format_str = "@.str.fmt.str = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n";
                     if !self.ir_code.contains("@.str.fmt.str") {
                         let insert_pos = self.ir_code.find("declare i32 @printf").unwrap_or(0);
@@ -445,8 +546,11 @@ impl CodeGenerator {
                                 // --- Siguiente Caso ---
                                 self.ir_code.push_str(&format!("{}:\n", next_label));
                             } else {
-                                // MODO BINDING: Si la variable no existe, creamos una variable temporal (como en Rust)
+                                // 🚀 MODO BINDING: La variable no existe, así que la creamos
+                                // Usamos val_reg (el valor que estamos evaluando en el match)
                                 let previous_scope = self.current_scope.clone();
+
+                                // Insertamos la variable con el valor actual del match
                                 self.current_scope.insert(nombre.clone(), (val_reg.clone(), "i64".to_string()));
 
                                 for stmt in &caso.cuerpo {
@@ -454,7 +558,6 @@ impl CodeGenerator {
                                 }
                                 self.ir_code.push_str(&format!("  br label %{}\n", end_label));
 
-                                // Restauramos el entorno (la variable temporal desaparece aquí)
                                 self.current_scope = previous_scope;
                             }
                         },
@@ -488,6 +591,17 @@ impl CodeGenerator {
                 
                 self.ir_code.push_str(&format!("while.{}:\n", exit_label));
             }
+            Declaracion::Importar { elementos: _, archivo: _ } => {
+                // 🚀 NUEVO: Importar declarations en LLVM
+                // Los módulos se cargan en tiempo de compilación
+                // Como ya se procesaron en el evaluador, aquí no hacemos nada
+            }
+            Declaracion::Exportar { nombre: _, es_modulo_default: _ } => {
+                // 🚀 NUEVO: Export declarations en LLVM
+                // Se procesan en el sistema de módulos
+                // En LLVM generamos solo comentarios informativos
+                // (En el futuro podría usar DWARF metadata)
+            }
             _ => {
                 println!("⚠️  Declaración no soportada: {:?}", stmt);
             }
@@ -499,6 +613,10 @@ impl CodeGenerator {
         match expr {
             Expresion::Entero(n) => {
                 Ok((n.to_string(), "i64".to_string()))
+            }
+            Expresion::Flotante(f) => {
+                // 🚀 NUEVO: Generamos constante flotante en LLVM IR
+                Ok((f.to_string(), "double".to_string()))
             }
             // --- NUEVO: INSTANCIAR UN STRUCT ---
             Expresion::InstanciaStruct { nombre, campos } => {
@@ -610,7 +728,59 @@ impl CodeGenerator {
             }
             // --- NUEVO: EVALUACIÓN DE LLAMADAS A FUNCIONES ---
             Expresion::Llamada { nombre, argumentos } => {
+                // 🚀 NUEVO: Funciones built-in (len, push, pop, etc)
+                match nombre.as_str() {
+                    "len" if argumentos.len() == 1 => {
+                        // len(array) retorna el tamaño del arreglo
+                        // En nuestro modelo: el primer i64 es el tamaño
+                        let (arr_reg, _) = self.generate_expr(&argumentos[0])?;
+                        
+                        // Cargamos el primer elemento que contiene la longitud
+                        let size_ptr = self.new_reg();
+                        self.ir_code.push_str(&format!("  {} = load i64, i64* {}\n", size_ptr, arr_reg));
+                        
+                        return Ok((size_ptr, "i64".to_string()));
+                    }
+                    "push" if argumentos.len() == 2 => {
+                        // push(array, valor) - agrega elemento al final
+                        let (arr_reg, _) = self.generate_expr(&argumentos[0])?;
+                        let (val_reg, _) = self.generate_expr(&argumentos[1])?;
+                        
+                        // Para simplificar en compilación: solo retornamos el array
+                        // (La mutabilidad se maneja en runtime normalmente)
+                        self.ir_code.push_str(&format!("  ; push {} to {}\n", val_reg, arr_reg));
+                        
+                        return Ok((arr_reg, "i64*".to_string()));
+                    }
+                    "pop" if argumentos.len() == 1 => {
+                        // pop(array) - retorna último elemento
+                        let (arr_reg, _) = self.generate_expr(&argumentos[0])?;
+                        let result_reg = self.new_reg();
+                        
+                        // Cargamos el último elemento
+                        // (simplificado: en este modelo necesitaría metadatos más complejos)
+                        self.ir_code.push_str(&format!("  ; pop from {}\n", arr_reg));
+                        
+                        return Ok((result_reg, "i64".to_string()));
+                    }
+                    "keys" if argumentos.len() == 1 => {
+                        // keys(dict) - retorna claves del diccionario
+                        let (dict_reg, _) = self.generate_expr(&argumentos[0])?;
+                        self.ir_code.push_str(&format!("  ; keys from dictionary: {}\n", dict_reg));
+                        
+                        return Ok((dict_reg, "i64*".to_string()));
+                    }
+                    "values" if argumentos.len() == 1 => {
+                        // values(dict) - retorna valores del diccionario
+                        let (dict_reg, _) = self.generate_expr(&argumentos[0])?;
+                        self.ir_code.push_str(&format!("  ; values from dictionary: {}\n", dict_reg));
+                        
+                        return Ok((dict_reg, "i64*".to_string()));
+                    }
+                    _ => {} // Continúar con llamadas a funciones normales
+                }
 
+                // Caso anterior: reemplazar para arrays
                 if nombre == "reemplazar" && argumentos.len() == 3 {
                     // 🚀 AÑADIR: extraemos arr_tipo aquí
                     let (arr_reg, arr_tipo) = self.generate_expr(&argumentos[0])?;
@@ -679,43 +849,93 @@ impl CodeGenerator {
                 Ok((result_reg, "i64".to_string()))
             }
             Expresion::Operacion { izquierda, operador, derecha } => {
-                let (left_reg, _) = self.generate_expr(izquierda)?;
-                let (right_reg, _) = self.generate_expr(derecha)?;
+                let (left_reg, left_tipo) = self.generate_expr(izquierda)?;
+                let (right_reg, right_tipo) = self.generate_expr(derecha)?;
                 
                 let result_reg = self.new_reg();
                 
+                // 🚀 NUEVO: Detectar si se operan flotantes
+                let es_flotante = left_tipo == "double" || right_tipo == "double";
+                let tipo_op = if es_flotante { "double" } else { "i64" };
+                
                 let instr = match operador {
-                    Token::Suma => format!("  {} = add i64 {}, {}\n", result_reg, left_reg, right_reg),
-                    Token::Resta => format!("  {} = sub i64 {}, {}\n", result_reg, left_reg, right_reg),
-                    Token::Multiplicacion => format!("  {} = mul i64 {}, {}\n", result_reg, left_reg, right_reg),
-                    Token::Division => format!("  {} = sdiv i64 {}, {}\n", result_reg, left_reg, right_reg),
-                    Token::Modulo => format!("  {} = srem i64 {}, {}\n", result_reg, left_reg, right_reg),
+                    Token::Suma => {
+                        if es_flotante {
+                            format!("  {} = fadd double {}, {}\n", result_reg, left_reg, right_reg)
+                        } else {
+                            format!("  {} = add i64 {}, {}\n", result_reg, left_reg, right_reg)
+                        }
+                    },
+                    Token::Resta => {
+                        if es_flotante {
+                            format!("  {} = fsub double {}, {}\n", result_reg, left_reg, right_reg)
+                        } else {
+                            format!("  {} = sub i64 {}, {}\n", result_reg, left_reg, right_reg)
+                        }
+                    },
+                    Token::Multiplicacion => {
+                        if es_flotante {
+                            format!("  {} = fmul double {}, {}\n", result_reg, left_reg, right_reg)
+                        } else {
+                            format!("  {} = mul i64 {}, {}\n", result_reg, left_reg, right_reg)
+                        }
+                    },
+                    Token::Division => {
+                        if es_flotante {
+                            format!("  {} = fdiv double {}, {}\n", result_reg, left_reg, right_reg)
+                        } else {
+                            format!("  {} = sdiv i64 {}, {}\n", result_reg, left_reg, right_reg)
+                        }
+                    },
+                    Token::Modulo => {
+                        if es_flotante {
+                            format!("  {} = frem double {}, {}\n", result_reg, left_reg, right_reg)
+                        } else {
+                            format!("  {} = srem i64 {}, {}\n", result_reg, left_reg, right_reg)
+                        }
+                    },
                     Token::MenorQue => {
                         let cmp_reg = self.new_reg();
-                        self.ir_code.push_str(&format!("  {} = icmp slt i64 {}, {}\n", cmp_reg, left_reg, right_reg));
+                        if es_flotante {
+                            self.ir_code.push_str(&format!("  {} = fcmp olt double {}, {}\n", cmp_reg, left_reg, right_reg));
+                        } else {
+                            self.ir_code.push_str(&format!("  {} = icmp slt i64 {}, {}\n", cmp_reg, left_reg, right_reg));
+                        }
                         format!("  {} = zext i1 {} to i64\n", result_reg, cmp_reg)
                     }
                     Token::MayorQue => {
                         let cmp_reg = self.new_reg();
-                        self.ir_code.push_str(&format!("  {} = icmp sgt i64 {}, {}\n", cmp_reg, left_reg, right_reg));
+                        if es_flotante {
+                            self.ir_code.push_str(&format!("  {} = fcmp ogt double {}, {}\n", cmp_reg, left_reg, right_reg));
+                        } else {
+                            self.ir_code.push_str(&format!("  {} = icmp sgt i64 {}, {}\n", cmp_reg, left_reg, right_reg));
+                        }
                         format!("  {} = zext i1 {} to i64\n", result_reg, cmp_reg)
                     }
 
                     Token::Igualdad => {
                         let cmp_reg = self.new_reg();
-                        self.ir_code.push_str(&format!("  {} = icmp eq i64 {}, {}\n", cmp_reg, left_reg, right_reg));
+                        if es_flotante {
+                            self.ir_code.push_str(&format!("  {} = fcmp oeq double {}, {}\n", cmp_reg, left_reg, right_reg));
+                        } else {
+                            self.ir_code.push_str(&format!("  {} = icmp eq i64 {}, {}\n", cmp_reg, left_reg, right_reg));
+                        }
                         format!("  {} = zext i1 {} to i64\n", result_reg, cmp_reg)
                     }
                     Token::Diferente => {
                         let cmp_reg = self.new_reg();
-                        self.ir_code.push_str(&format!("  {} = icmp ne i64 {}, {}\n", cmp_reg, left_reg, right_reg));
+                        if es_flotante {
+                            self.ir_code.push_str(&format!("  {} = fcmp one double {}, {}\n", cmp_reg, left_reg, right_reg));
+                        } else {
+                            self.ir_code.push_str(&format!("  {} = icmp ne i64 {}, {}\n", cmp_reg, left_reg, right_reg));
+                        }
                         format!("  {} = zext i1 {} to i64\n", result_reg, cmp_reg)
                     }
                     _ => return Err(format!("Operador no soportado: {:?}", operador)),
                 };
                 
                 self.ir_code.push_str(&instr);
-                Ok((result_reg, "i64".to_string()))
+                Ok((result_reg, tipo_op.to_string()))
             }
             _ => Err(format!("Expresión no soportada: {:?}", expr)),
         }
@@ -756,8 +976,112 @@ impl CodeGenerator {
 
         println!("📄 Archivo IR: {}", ll_file);
 
+        // 🚀 NUEVO: Validar el IR LLVM con llvm-verify-ir (CRÍTICO para detectar errores)
+        println!("✅ Validando integridad de LLVM IR...");
+        let verify_paths = vec![
+            "llvm-verify-ir",
+            "D:\\LLVM\\bin\\llvm-verify-ir.exe",
+            "d:\\LLVM\\bin\\llvm-verify-ir.exe",
+            "/d/LLVM/bin/llvm-verify-ir.exe",
+            "c:\\Program Files\\LLVM\\bin\\llvm-verify-ir.exe",
+        ];
+
+        let mut verify_found: Option<&str> = None;
+        for path in &verify_paths {
+            match std::process::Command::new(path).arg("--version").output() {
+                Ok(output) if output.status.success() => {
+                    verify_found = Some(path);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(verify_cmd) = verify_found {
+            let verify_result = Command::new(verify_cmd)
+                .arg(&ll_file)
+                .output()
+                .map_err(|e| format!("Error ejecutando llvm-verify-ir: {}", e))?;
+
+            if !verify_result.status.success() {
+                let stderr = String::from_utf8_lossy(&verify_result.stderr);
+                let stdout = String::from_utf8_lossy(&verify_result.stdout);
+                
+                println!("\n❌ ═════════════════════════════════════════════");
+                println!("🐛 ERROR EN VALIDACIÓN DE LLVM IR");
+                println!("═════════════════════════════════════════════");
+                println!("{}\n{}", stderr, stdout);
+                println!("═════════════════════════════════════════════\n");
+                
+                return Err(format!("LLVM IR validation failed:\n{}\n{}", stderr, stdout));
+            }
+            
+            println!("✅ IR validado exitosamente - sin errores de estructura");
+        } else {
+            println!("⚠️  llvm-verify-ir no encontrado, saltando validación");
+        }
+
+        // 🚀 NUEVO: Optimizar el IR LLVM antes de compilar
+        println!("⚙️  Optimizando LLVM IR con 'opt'...");
+        let optimized_ll_file = output_file.replace(".exe", ".opt.ll");
+        let opt_paths = vec![
+            "opt",
+            "D:\\LLVM\\bin\\opt.exe",
+            "d:\\LLVM\\bin\\opt.exe",
+            "/d/LLVM/bin/opt.exe",
+            "c:\\Program Files\\LLVM\\bin\\opt.exe",
+        ];
+        
+        let mut opt_found: Option<&str> = None;
+        for path in &opt_paths {
+            match std::process::Command::new(path).arg("--version").output() {
+                Ok(output) if output.status.success() => {
+                    opt_found = Some(path);
+                    println!("✅ opt encontrado en: {}", path);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        // Aplicar optimizaciones
+        if let Some(opt_cmd) = opt_found {
+            let opt_level = match self.opt_level {
+                OptimizationLevel::None => "-O0",
+                OptimizationLevel::Fast => "-O1",
+                OptimizationLevel::Balanced => "-O2",
+                OptimizationLevel::Aggressive => "-O3",
+            };
+            
+            let opt_compile = Command::new(opt_cmd)
+                .args(&[
+                    opt_level,
+                    "-inline-threshold=100",  // Inline functions más agresivamente
+                    &ll_file,
+                    "-o",
+                    &optimized_ll_file
+                ])
+                .output()
+                .map_err(|e| format!("Error ejecutando opt: {}", e))?;
+
+            if !opt_compile.status.success() {
+                let stderr = String::from_utf8_lossy(&opt_compile.stderr);
+                println!("⚠️  Optimización falló, continuando sin opt: {}", stderr);
+                // Si falla, usamos el IR sin optimizar
+            } else {
+                println!("✅ IR optimizado generado");
+            }
+        } else {
+            println!("⚠️  opt no encontrado, compilando sin optimización de IR");
+        }
+
         // Compilar .ll a .obj directamente SIN assembly intermedio
         let obj_file = output_file.replace(".exe", ".obj");
+        let ir_file_to_compile = if std::path::Path::new(&optimized_ll_file).exists() {
+            &optimized_ll_file
+        } else {
+            &ll_file
+        };
         
         // Rutas comunes donde podrían estar clang y llc
         let clang_paths = vec![
@@ -788,10 +1112,10 @@ impl CodeGenerator {
                 .args(&[
                     "-c",
                     opt_flag,  // OPTIMIZACIÓN LEVEL
-                    "--target=x86_64-pc-windows-msvc",  // MSVC object format
+                    &format!("--target={}", self.target.as_triple()),
                     "-fno-asynchronous-unwind-tables",
                     "-flto",   // Link Time Optimization
-                    &ll_file,
+                    ir_file_to_compile,
                     "-o",
                     &obj_file
                 ])
@@ -810,55 +1134,186 @@ impl CodeGenerator {
             return Err("clang no disponible en ninguna ubicación estándar".to_string());
         }
 
-        // Link con lld-link (MSVC linker - compatible con clang object files)
-        println!("🔗 Linkeando objeto a ejecutable con lld-link...");
+        // 🚀 NUEVO: Compilar kura_runtime.ll con la runtime library
+        println!("📦 Compilando runtime library de KURA para target: {}...", self.target.as_triple());
+        let runtime_ll = "src/kura_runtime.ll";
+        let runtime_obj = "kura_runtime.obj";
         
-        let out_flag = format!("-out:{}", output_file);
-        let link = Command::new("lld-link")
-            .args(&[
-                &obj_file,
-                &out_flag,
-                "-subsystem:console",
-                "-defaultlib:libcmt",  // CRT library
-                "-defaultlib:kernel32.lib",  // Kernel32
-            ])
-            .output();
-
-        let linked = if let Ok(output) = link {
-            if output.status.success() {
-                println!("✅ Linkeado con MSVC linker (lld-link)");
-                true
-            } else {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                println!("⚠️  lld-link falló, intentando gcc: {}", stderr);
-                false
+        if std::path::Path::new(runtime_ll).exists() {
+            if let Some(clang_cmd) = clang_found {
+                let runtime_compile = Command::new(clang_cmd)
+                    .args(&[
+                        "-c",
+                        "-O2",
+                        &format!("--target={}", self.target.as_triple()),
+                        runtime_ll,
+                        "-o",
+                        runtime_obj
+                    ])
+                    .output();
+                
+                match runtime_compile {
+                    Ok(output) if output.status.success() => {
+                        println!("✅ Runtime library compilada: {}", runtime_obj);
+                    }
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        println!("⚠️  Error compilando runtime library: {}", stderr);
+                        println!("⚠️  Continuando sin runtime library (algunas funciones no disponibles)");
+                    }
+                    Err(_) => {
+                        println!("⚠️  No se pudo compilar runtime library, continuando...");
+                    }
+                }
             }
         } else {
-            false
-        };
-
-        if !linked {
-            // Fallback a GCC si lld-link no funciona
-            println!("🔗 Fallback: Linkeando con GCC...");
-            let gcc_link = Command::new("gcc")
-                .args(&[&obj_file, "-o", output_file])
-                .output()
-                .map_err(|e| format!("Error linkeando: {}", e))?;
-
-            if !gcc_link.status.success() {
-                let stderr = String::from_utf8_lossy(&gcc_link.stderr);
-                return Err(format!("Error de linking (GCC): {}", stderr));
-            }
-            
-            println!("✅ Linkeado con GCC (fallback)");
+            println!("⚠️  kura_runtime.ll no encontrado, compilando sin runtime library");
         }
 
-        // Limpiar archivos intermedios
+        // 🚀 ACTUALIZADO: Linker adaptativo según target
+        println!("🔗 Linkeando objeto a ejecutable para target: {}...", self.target.as_triple());
+        
+        let linker_cmd = self.target.linker_command();
+        let exe_extension = match self.target {
+            CompilationTarget::WindowsX86_64 => ".exe",
+            _ => "",
+        };
+        let final_output = if exe_extension.is_empty() {
+            output_file.to_string()
+        } else {
+            output_file.to_string()
+        };
+
+        match self.target {
+            CompilationTarget::WindowsX86_64 => {
+                // Linker de Windows: lld-link (MSVC)
+                let out_flag = format!("-out:{}", final_output);
+                let mut link_args = vec![
+                    obj_file.clone(),
+                    out_flag.clone(),
+                    "-subsystem:console".to_string(),
+                    "-defaultlib:libcmt".to_string(),  // CRT library
+                    "-defaultlib:kernel32.lib".to_string(),  // Kernel32
+                ];
+                
+                if std::path::Path::new(runtime_obj).exists() {
+                    link_args.insert(1, runtime_obj.to_string());
+                }
+                
+                let link_args_refs: Vec<&str> = link_args.iter().map(|s| s.as_str()).collect();
+                let link = Command::new(linker_cmd)
+                    .args(&link_args_refs)
+                    .output();
+
+                let linked = if let Ok(output) = link {
+                    if output.status.success() {
+                        println!("✅ Linkeado con MSVC linker ({})", linker_cmd);
+                        true
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        println!("⚠️  {} falló, intentando gcc: {}", linker_cmd, stderr);
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if !linked {
+                    // Fallback a GCC si lld-link no funciona
+                    println!("🔗 Fallback: Linkeando con GCC...");
+                    let gcc_link = Command::new("gcc")
+                        .args(&[&obj_file, "-o", &final_output])
+                        .output();
+
+                    match gcc_link {
+                        Ok(output) if output.status.success() => {
+                            println!("✅ Linkeado con GCC (fallback)");
+                        }
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            return Err(format!("Error linkeando con GCC: {}", stderr));
+                        }
+                        Err(e) => {
+                            return Err(format!(
+                                "GCC no encontrado (fallback falló): {}",
+                                e
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Linker de Unix: ld.lld o ld64.lld
+                let mut link_args = vec![
+                    "-o".to_string(),
+                    final_output.clone(),
+                    obj_file.clone(),
+                ];
+                
+                if std::path::Path::new(runtime_obj).exists() {
+                    link_args.push(runtime_obj.to_string());
+                }
+                
+                // Agregar bibliotecas de C estándar según el target
+                match self.target {
+                    CompilationTarget::LinuxX86_64 | CompilationTarget::LinuxARM64 => {
+                        link_args.push("-lc".to_string());
+                        link_args.push("-lm".to_string());  // Math library
+                    }
+                    CompilationTarget::MacOSX86_64 | CompilationTarget::MacOSARM64 => {
+                        link_args.push("-lSystem".to_string());
+                        link_args.push("-lm".to_string());
+                    }
+                    _ => {}
+                }
+                
+                let link_args_refs: Vec<&str> = link_args.iter().map(|s| s.as_str()).collect();
+                let link = Command::new(linker_cmd)
+                    .args(&link_args_refs)
+                    .output();
+
+                match link {
+                    Ok(output) if output.status.success() => {
+                        println!("✅ Linkeado con {} (Unix linker)", linker_cmd);
+                    }
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        println!("⚠️  {} falló, intentando ld: {}", linker_cmd, stderr);
+                        
+                        // Fallback a ld estándar
+                        let generic_link = Command::new("ld")
+                            .args(&link_args_refs)
+                            .output();
+
+                        match generic_link {
+                            Ok(output) if output.status.success() => {
+                                println!("✅ Linkeado con ld (fallback)");
+                            }
+                            Ok(output) => {
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                return Err(format!("Error linkeando con ld: {}", stderr));
+                            }
+                            Err(e) => {
+                                return Err(format!("Error linkeando con ld: {}", e));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Err(format!("Error ejecutando linker: {}", e));
+                    }
+                }
+            }
+        }
+
+        println!("✅ Ejecutable nativo generado: {}", final_output);
+        
+        // 🚀 NUEVO: Limpiar también kura_runtime.obj
         let _ = fs::remove_file(&ll_file);
+        let _ = fs::remove_file(&optimized_ll_file);
         let _ = fs::remove_file(&obj_file);
         let _ = fs::remove_file(output_file.replace(".exe", ".s"));
+        let _ = fs::remove_file(runtime_obj);  // Limpiar runtime object
 
-        println!("✅ Ejecutable nativo generado: {}", output_file);
         Ok(())
     }
 }

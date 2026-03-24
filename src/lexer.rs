@@ -98,6 +98,14 @@ impl Lexer {
                     Token::Resta
                 }
             }
+            '&' => {
+                if self.position + 1 < self.input.len() && self.input[self.position + 1] == '&' {
+                    self.position += 1;
+                    Token::And
+                } else {
+                    Token::Ampersand  // 🚀 NUEVO: single &
+                }
+            }
             '=' => {
                 if self.position + 1 < self.input.len() && self.input[self.position + 1] == '=' {
                     self.position += 1; // Saltamos el segundo '='
@@ -225,7 +233,11 @@ impl Lexer {
             "match" => Token::Match,
             "return" => Token::Return,
             "import" => Token::Import,
+            "export" => Token::Export,  // 🚀 NUEVO
             "from" => Token::From,
+            "as" => Token::As,          // 🚀 NUEVO
+            "new" => Token::New,        // 🚀 NUEVO: allocate memory
+            "null" => Token::Null,      // 🚀 NUEVO: null pointer
             "break" => Token::Break,
             "int" | "float" | "str" | "bool" | "Arreglo" | "void" => Token::Tipo(palabra),
             _ => Token::Identificador(palabra),
@@ -234,9 +246,24 @@ impl Lexer {
 
     fn leer_numero(&mut self) -> Token {
         let inicio = self.position;
+        
+        // 🚀 NUEVO: Reconocer números flotantes
         while self.position < self.input.len() && self.input[self.position].is_ascii_digit() {
             self.position += 1;
         }
+        
+        // Verificar si hay un punto decimal
+        if self.position < self.input.len() && self.input[self.position] == '.' && 
+           self.position + 1 < self.input.len() && self.input[self.position + 1].is_ascii_digit() {
+            self.position += 1; // Saltamos el punto
+            while self.position < self.input.len() && self.input[self.position].is_ascii_digit() {
+                self.position += 1;
+            }
+            
+            let numero_str: String = self.input[inicio..self.position].iter().collect();
+            return Token::Flotante(numero_str.parse::<f64>().unwrap_or(0.0));
+        }
+        
         let numero_str: String = self.input[inicio..self.position].iter().collect();
         Token::Entero(numero_str.parse::<i64>().unwrap_or(0))
     }

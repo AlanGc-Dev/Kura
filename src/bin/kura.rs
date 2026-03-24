@@ -1,5 +1,5 @@
 use std::fs;
-use kura::{lexer, parser, evaluator, codegen::{self, OptimizationLevel}};
+use kura::{lexer, parser, evaluator, codegen::{self, OptimizationLevel, CompilationTarget}};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -11,6 +11,7 @@ fn main() {
 
     let mut compile_mode = false;
     let mut opt_level = OptimizationLevel::Balanced;
+    let mut target = CompilationTarget::WindowsX86_64;
     let mut archivo = String::new();
     let mut i = 1;
 
@@ -19,6 +20,21 @@ fn main() {
             "--compile" => {
                 compile_mode = true;
                 i += 1;
+            }
+            "--target" => {
+                i += 1;
+                if i < args.len() {
+                    if let Some(t) = CompilationTarget::from_string(&args[i]) {
+                        target = t;
+                        i += 1;
+                    } else {
+                        println!("❌ Target desconocido: {}. Usa --help para ver los targets disponibles.", args[i]);
+                        std::process::exit(1);
+                    }
+                } else {
+                    println!("❌ Se requiere especificar el target después de --target");
+                    std::process::exit(1);
+                }
             }
             "--release" => {
                 opt_level = OptimizationLevel::Aggressive;
@@ -53,10 +69,10 @@ fn main() {
         return;
     }
 
-    ejecutar_archivo(&archivo, compile_mode, opt_level);
+    ejecutar_archivo(&archivo, compile_mode, opt_level, target);
 }
 
-fn ejecutar_archivo(ruta: &str, compile: bool, opt_level: OptimizationLevel) {
+fn ejecutar_archivo(ruta: &str, compile: bool, opt_level: OptimizationLevel, target: CompilationTarget) {
     let ruta_archivo = if ruta.contains('/') || ruta.contains('\\') {
         ruta.to_string()
     } else {
@@ -79,7 +95,7 @@ fn ejecutar_archivo(ruta: &str, compile: bool, opt_level: OptimizationLevel) {
     let programa = parser.parse_programa();
 
     if compile {
-        match codegen::CodeGenerator::with_optimization(opt_level) {
+        match codegen::CodeGenerator::with_target(opt_level, target) {
             Ok(mut codegen) => {
                 match codegen.generate(programa) {
                     Ok(_) => {
@@ -124,9 +140,34 @@ fn ejecutar_archivo(ruta: &str, compile: bool, opt_level: OptimizationLevel) {
 }
 
 fn mostrar_ayuda() {
-    println!("Uso:");
+    println!("╔════════════════════════════════════════════════════════════╗");
+    println!("║         KURA LANGUAGE COMPILER - CrossCompilation         ║");
+    println!("╚════════════════════════════════════════════════════════════╝");
+    println!("\n📖 Uso:");
     println!("  kura archivo.kr");
     println!("  kura --compile archivo.kr");
     println!("  kura --compile --release archivo.kr");
-    println!("  kura --compile -O0/-O1/-O2/-O3 archivo.kr");
+    println!("  kura --compile --target <TARGET> archivo.kr");
+    println!("  kura --compile --target <TARGET> -O0/-O1/-O2/-O3 archivo.kr");
+    
+    println!("\n🎯 Targets Soportados:");
+    println!("  windows-x86_64     Windows 64-bit (default)");
+    println!("  linux-x86_64       Linux 64-bit");
+    println!("  linux-arm64        Linux ARM64 (Raspberry Pi 4+)");
+    println!("  macos-x86_64       macOS 64-bit (Intel)");
+    println!("  macos-arm64        macOS ARM64 (Apple Silicon)");
+    
+    println!("\n⚡ Niveles de Optimización:");
+    println!("  -O0               Sin optimización (rápida compilación)");
+    println!("  -O1               Optimización mínima");
+    println!("  -O2               Optimización balanceada (default)");
+    println!("  -O3               Optimización máxima");
+    println!("  --release         Equivalente a -O3");
+    
+    println!("\n📝 Ejemplos:");
+    println!("  kura test.kr                                  # Ejecutar en modo intérprete");
+    println!("  kura --compile test.kr                        # Compilar para Windows x64");
+    println!("  kura --compile --target linux-x86_64 test.kr  # Compilar para Linux");
+    println!("  kura --compile --target macos-arm64 -O3 test.kr # Compilar para macOS Apple Silicon");
+    println!();
 }

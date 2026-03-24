@@ -18,20 +18,26 @@ pub enum Token {
     Match,  // <-- NUEVO
     Return,
     Import,
+    Export,  // 🚀 NUEVO: export keyword
     From,
     Break,
     And,    // && <-- NUEVO
     Or,
+    As,     // 🚀 NUEVO: import X as Y
+    New,    // 🚀 NUEVO: allocate memory
+    Null,   // 🚀 NUEVO: null pointer
 
     Identificador(String),
     Tipo(String),
     Entero(i64),
+    Flotante(f64),  // 🚀 NUEVO: Token para flotantes
     Cadena(String),
 
     // Símbolos
     DosPuntos,
     Asignacion,
     PuntoYComa,
+    Ampersand,          // 🚀 NUEVO: & (reference operator)
 
     // Matemáticas y Lógica
     Suma,           // +

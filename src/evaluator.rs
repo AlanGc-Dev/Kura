@@ -11,6 +11,7 @@ use crate::types::TipoKura;
 #[derive(Debug, Clone)]
 pub enum ObjetoKura {
     Entero(i64),
+    Flotante(f64),  // 🚀 NUEVO: Soporte para flotantes
     Booleano(bool),
     Cadena(String),
     Arreglo(Vec<ObjetoKura>),
@@ -32,6 +33,7 @@ pub enum ObjetoKura {
         nombre: String,
         campos: Rc<RefCell<HashMap<String, ObjetoKura>>>,
     },
+    Puntero(Rc<RefCell<ObjetoKura>>),  // 🚀 NUEVO: Heap-allocated object with RC/GC
     FuncionNativa(fn(Vec<ObjetoKura>) -> ObjetoKura),
 }
 
@@ -333,6 +335,7 @@ fn evaluar_declaracion(declaracion: &Declaracion, entorno: Rc<RefCell<Entorno>>)
 
             let rutas_busqueda = vec![
                 PathBuf::from("."),
+                PathBuf::from("src"),                  // 🚀 NUEVO: Buscar en src
                 PathBuf::from("kura_modules"),
                 PathBuf::from("C:/Kura/std"),
             ];
@@ -380,6 +383,17 @@ fn evaluar_declaracion(declaracion: &Declaracion, entorno: Rc<RefCell<Entorno>>)
 
             ObjetoKura::Nulo
         },
+        Declaracion::Exportar { nombre, es_modulo_default } => {
+            // 🚀 NUEVO: Export declaration (módulo systems)
+            // Por ahora, simplemente ignoramos en evaluator
+            // El sistema de módulos lo procesará en el análisis
+            if *es_modulo_default {
+                println!("📦 Exportando como default: {}", nombre);
+            } else {
+                println!("📦 Exportando: {}", nombre);
+            }
+            ObjetoKura::Nulo
+        },
         Declaracion::Struct { nombre, campos, metodos } => {
             let mut campos_map = HashMap::new();
             for (c_nom, c_tipo) in campos {
@@ -417,6 +431,7 @@ fn evaluar_declaracion(declaracion: &Declaracion, entorno: Rc<RefCell<Entorno>>)
 fn evaluar_expresion(expresion: &Expresion, entorno: Rc<RefCell<Entorno>>) -> ObjetoKura {
     match expresion {
         Expresion::Entero(n) => ObjetoKura::Entero(*n),
+        Expresion::Flotante(f) => ObjetoKura::Flotante(*f),  // 🚀 NUEVO
         Expresion::Booleano(b) => ObjetoKura::Booleano(*b),
         Expresion::Cadena(texto) => ObjetoKura::Cadena(texto.to_string()),
         Expresion::Identificador(nombre) => entorno.borrow().obtener(&nombre).unwrap_or(ObjetoKura::Nulo),
@@ -684,6 +699,7 @@ fn vincular_patron(patron: &Pattern, valor: &ObjetoKura, entorno: Rc<RefCell<Ent
 pub fn imprimir_objeto(obj: &ObjetoKura) {
     match obj {
         ObjetoKura::Entero(n) => print!("{}", n),
+        ObjetoKura::Flotante(f) => print!("{}", f),  // 🚀 NUEVO
         ObjetoKura::Booleano(b) => print!("{}", b),
         ObjetoKura::Cadena(t) => print!("{}", t),
         ObjetoKura::Arreglo(arr) => {
