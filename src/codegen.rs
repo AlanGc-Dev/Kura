@@ -19,7 +19,8 @@ pub enum OptimizationLevel {
 pub struct CodeGenerator {
     ir_code: String,
     var_counter: usize,
-    current_scope: HashMap<String, String>, // nombre -> registro LLVM
+    // ¡MODIFICADO! Ahora guarda (registro, tipo)
+    current_scope: HashMap<String, (String, String)>,
     opt_level: OptimizationLevel,
 }
 
@@ -50,55 +51,136 @@ impl CodeGenerator {
         self.ir_code.push_str("; LLVM IR generado por KURA\n");
         self.ir_code.push_str("target triple = \"x86_64-pc-windows-gnu\"\n");
         self.ir_code.push_str("target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"\n\n");
-        
+
         // Declaración de printf
         self.ir_code.push_str("declare i32 @printf(i8*, ...)\n");
         self.ir_code.push_str("declare i32 @sprintf(i8*, i8*, ...)\n\n");
-        
-        // Definición de la función main
-        self.ir_code.push_str("define i32 @main() {\n");
-        self.ir_code.push_str("entry:\n");
 
-        // Generar el cuerpo
+        // 🚀 NUEVO: 1. Filtrar y generar primero todas las Funciones definidas por el usuario
         for stmt in &programa.declaraciones {
-            self.generate_statement(stmt)?;
+            if let Declaracion::Funcion { .. } = stmt {
+                self.generate_statement(stmt)?;
+            }
         }
 
-        // Retorno 0
+        // 🚀 NUEVO: 2. Definición de la función main para las instrucciones globales
+        self.ir_code.push_str("\ndefine i32 @main() {\n");
+        self.ir_code.push_str("entry:\n");
+
+        // 🚀 NUEVO: 3. Generar el cuerpo de main (saltando las funciones que ya generamos)
+        for stmt in &programa.declaraciones {
+            if !matches!(stmt, Declaracion::Funcion { .. }) {
+                self.generate_statement(stmt)?;
+            }
+        }
+
+        // Retorno 0 para el main
         self.ir_code.push_str("  ret i32 0\n");
         self.ir_code.push_str("}\n");
 
         println!("✅ LLVM IR generada exitosamente");
-        println!("📊 {} declaraciones compiladas", programa.declaraciones.len());
-
         Ok(self.ir_code.clone())
     }
 
     fn generate_statement(&mut self, stmt: &Declaracion) -> Result<(), String> {
         match stmt {
             Declaracion::Let { nombre, valor, .. } => {
-                let (reg, _type) = self.generate_expr(valor)?;
-                // En LLVM textual, no necesitamos alloca para valores simples
-                // Solo guardamos en el scope
-                self.current_scope.insert(nombre.clone(), reg);
+                // Obtenemos tanto el registro como el tipo (ej: "i64" o "i8*")
+                let (reg, tipo) = self.generate_expr(valor)?;
+                self.current_scope.insert(nombre.clone(), (reg, tipo));
             }
-            Declaracion::Print { valor } => {
-                let (reg, _type) = self.generate_expr(valor)?;
-                
-                // @.str format string - %lld\0A\00 = 6 bytes (including null terminator)
-                // Insertar string de formato antes de main
-                let format_str = "@.str.fmt = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\", align 1\n";
-                if !self.ir_code.contains("@.str.fmt") {
-                    let insert_pos = self.ir_code.find("define i32 @main").unwrap();
-                    self.ir_code.insert_str(insert_pos, format_str);
+
+            // --- NUEVO: SOPORTE PARA FUNCIONES ---
+            Declaracion::Funcion { nombre, parametros, retorno: _, cuerpo } => {
+                // Preparamos los parámetros (asumimos i64 por defecto para números)
+                let mut params_ir = Vec::new();
+                for (param_nombre, _) in parametros {
+                    params_ir.push(format!("i64 %{}", param_nombre));
                 }
-                
-                self.ir_code.push_str("  %str.ptr = getelementptr inbounds [5 x i8], [5 x i8]* @.str.fmt, i32 0, i32 0\n");
-                self.ir_code.push_str(&format!("  call i32 (i8*, ...) @printf(i8* %str.ptr, i64 {})\n", reg));
+                let signature = params_ir.join(", ");
+
+                // Definimos la función en LLVM IR
+                self.ir_code.push_str(&format!("define i64 @{}({}) {{\n", nombre, signature));
+                self.ir_code.push_str("entry:\n");
+
+                // Clonamos el scope actual para no contaminarlo
+                let previous_scope = self.current_scope.clone();
+
+                // Registramos los parámetros como variables locales para que Kura los encuentre
+                for (param_nombre, _) in parametros {
+                    self.current_scope.insert(param_nombre.clone(), (format!("%{}", param_nombre), "i64".to_string()));
+                }
+
+                // Compilamos el cuerpo de la función
+                let mut tiene_return = false;
+                for stmt in cuerpo {
+                    self.generate_statement(stmt)?;
+                    if matches!(stmt, Declaracion::Return { .. }) {
+                        tiene_return = true;
+                    }
+                }
+
+                // Si la función no tiene un return explícito, devolvemos 0 por defecto
+                if !tiene_return {
+                    self.ir_code.push_str("  ret i64 0\n");
+                }
+
+                self.ir_code.push_str("}\n\n");
+
+                // Restauramos el scope global
+                self.current_scope = previous_scope;
+            }
+
+            // --- NUEVO: SOPORTE PARA RETURN ---
+            Declaracion::Return { valor } => {
+                let (reg, _) = self.generate_expr(valor)?;
+                self.ir_code.push_str(&format!("  ret i64 {}\n", reg));
+            }
+
+            // --- NUEVO: SOPORTE PARA LLAMADAS SUELTAS (Ej: saludar();) ---
+            Declaracion::LlamadaSuelta { nombre, argumentos } => {
+                let mut args_ir = Vec::new();
+                for arg in argumentos {
+                    let (reg, _) = self.generate_expr(arg)?;
+                    args_ir.push(format!("i64 {}", reg));
+                }
+                let args_str = args_ir.join(", ");
+                self.ir_code.push_str(&format!("  call i64 @{}({})\n", nombre, args_str));
+            }
+
+            // --- ACTUALIZADO: PRINT INTELIGENTE ---
+            Declaracion::Print { valor } => {
+                // Ahora usamos el segundo valor (el tipo) que nos devuelve generate_expr
+                let (reg, tipo) = self.generate_expr(valor)?;
+
+                if tipo == "i64" {
+                    // CASO 1: Imprimir un Número Entero
+                    let format_str = "@.str.fmt.i64 = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\", align 1\n";
+                    if !self.ir_code.contains("@.str.fmt.i64") {
+                        let insert_pos = self.ir_code.find("declare i32 @printf").unwrap_or(0);
+                        self.ir_code.insert_str(insert_pos, format_str);
+                    }
+
+                    let ptr_reg = self.new_reg();
+                    self.ir_code.push_str(&format!("  {} = getelementptr inbounds [6 x i8], [6 x i8]* @.str.fmt.i64, i32 0, i32 0\n", ptr_reg));
+                    self.ir_code.push_str(&format!("  call i32 (i8*, ...) @printf(i8* {}, i64 {})\n", ptr_reg, reg));
+                }
+                else if tipo == "i8*" {
+                    // CASO 2: Imprimir una Cadena de Texto
+                    let format_str = "@.str.fmt.str = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n";
+                    if !self.ir_code.contains("@.str.fmt.str") {
+                        let insert_pos = self.ir_code.find("declare i32 @printf").unwrap_or(0);
+                        self.ir_code.insert_str(insert_pos, format_str);
+                    }
+
+                    let ptr_reg = self.new_reg();
+                    self.ir_code.push_str(&format!("  {} = getelementptr inbounds [4 x i8], [4 x i8]* @.str.fmt.str, i32 0, i32 0\n", ptr_reg));
+                    self.ir_code.push_str(&format!("  call i32 (i8*, ...) @printf(i8* {}, i8* {})\n", ptr_reg, reg));
+                }
             }
             Declaracion::Reasignacion { nombre, valor } => {
-                let (reg, _type) = self.generate_expr(valor)?;
-                self.current_scope.insert(nombre.clone(), reg);
+                let (reg, tipo) = self.generate_expr(valor)?;
+                self.current_scope.insert(nombre.clone(), (reg, tipo));
             }
             Declaracion::If { condicion, consecuencia, alternativa } => {
                 let (cond_reg, _) = self.generate_expr(condicion)?;
@@ -160,11 +242,50 @@ impl CodeGenerator {
                 Ok((n.to_string(), "i64".to_string()))
             }
             Expresion::Identificador(name) => {
-                if let Some(reg) = self.current_scope.get(name) {
-                    Ok((reg.clone(), "i64".to_string()))
+                if let Some((reg, tipo)) = self.current_scope.get(name) {
+                    // ¡MODIFICADO! Ahora devolvemos su tipo real (i64 o i8*)
+                    Ok((reg.clone(), tipo.clone()))
                 } else {
                     Err(format!("Variable {} no definida", name))
                 }
+            }
+            // --- NUEVO: EVALUACIÓN DE LLAMADAS A FUNCIONES ---
+            Expresion::Llamada { nombre, argumentos } => {
+                let mut args_ir = Vec::new();
+                // Compilamos cada argumento
+                for arg in argumentos {
+                    let (reg, _) = self.generate_expr(arg)?;
+                    args_ir.push(format!("i64 {}", reg));
+                }
+                let args_str = args_ir.join(", ");
+
+                // Creamos un nuevo registro para guardar el resultado de la función
+                let result_reg = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = call i64 @{}({})\n", result_reg, nombre, args_str));
+
+                Ok((result_reg, "i64".to_string()))
+            }
+            // --- NUEVO: SOPORTE PARA CADENAS DE TEXTO ---
+            Expresion::Cadena(texto) => {
+                // LLVM requiere que las cadenas terminen en un byte nulo (\00)
+                let text_len = texto.len() + 1;
+                let str_name = format!("@.str.{}", self.var_counter);
+                self.var_counter += 1;
+
+                // 1. Creamos la constante global con el texto
+                let global_decl = format!("{} = private unnamed_addr constant [{} x i8] c\"{}\\00\", align 1\n", str_name, text_len, texto);
+
+                // 2. Inyectamos la constante arriba de todo (antes de las funciones)
+                if let Some(insert_pos) = self.ir_code.find("declare i32 @printf") {
+                    self.ir_code.insert_str(insert_pos, &global_decl);
+                }
+
+                // 3. Generamos la instrucción getelementptr para obtener la dirección de memoria
+                let ptr_reg = self.new_reg();
+                self.ir_code.push_str(&format!("  {} = getelementptr inbounds [{} x i8], [{} x i8]* {}, i32 0, i32 0\n", ptr_reg, text_len, text_len, str_name));
+
+                // Retornamos el registro y le avisamos al compilador que es tipo puntero (i8*)
+                Ok((ptr_reg, "i8*".to_string()))
             }
             Expresion::Operacion { izquierda, operador, derecha } => {
                 let (left_reg, _) = self.generate_expr(izquierda)?;
@@ -188,6 +309,7 @@ impl CodeGenerator {
                         self.ir_code.push_str(&format!("  {} = icmp sgt i64 {}, {}\n", cmp_reg, left_reg, right_reg));
                         format!("  {} = zext i1 {} to i64\n", result_reg, cmp_reg)
                     }
+
                     Token::Igualdad => {
                         let cmp_reg = self.new_reg();
                         self.ir_code.push_str(&format!("  {} = icmp eq i64 {}, {}\n", cmp_reg, left_reg, right_reg));

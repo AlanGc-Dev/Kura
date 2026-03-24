@@ -1,6 +1,6 @@
-fn sumar(a, b) {
-    return a + b;
+fn multiplicar(a, b) {
+    return a * b;
 }
 
-let resultado = sumar(5, 3);
+let resultado = multiplicar(50, 2);
 print resultado;

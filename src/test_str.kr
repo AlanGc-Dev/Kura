@@ -1,0 +1,7 @@
+let saludo = "Hola Kura, ya hablo texto!";
+print saludo;
+
+let despedida = "Compilando nativo con LLVM";
+print despedida;
+
+print 1000;
