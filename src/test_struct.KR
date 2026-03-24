@@ -1,0 +1,20 @@
+struct Jugador {
+    vida: Entero,
+    ataque: Entero
+}
+
+// 1. Instanciar el objeto
+let heroe = Jugador {
+    vida: 100,
+    ataque: 25
+};
+
+// 2. Leer propiedades
+print "Vida inicial:";
+print heroe.vida;
+
+// 3. Modificar propiedades
+heroe.vida = 50;
+
+print "Vida despues del golpe:";
+print heroe.vida;

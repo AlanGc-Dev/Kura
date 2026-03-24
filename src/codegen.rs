@@ -19,8 +19,9 @@ pub enum OptimizationLevel {
 pub struct CodeGenerator {
     ir_code: String,
     var_counter: usize,
-    // ¡MODIFICADO! Ahora guarda (registro, tipo)
     current_scope: HashMap<String, (String, String)>,
+    // 🚀 NUEVO: Guarda (Nombre del Struct -> (Nombre del Campo -> Indice))
+    struct_info: HashMap<String, HashMap<String, usize>>,
     opt_level: OptimizationLevel,
 }
 
@@ -30,6 +31,7 @@ impl CodeGenerator {
             ir_code: String::new(),
             var_counter: 0,
             current_scope: HashMap::new(),
+            struct_info: HashMap::new(),
             opt_level: OptimizationLevel::Balanced,
         })
     }
@@ -39,6 +41,7 @@ impl CodeGenerator {
             ir_code: String::new(),
             var_counter: 0,
             current_scope: HashMap::new(),
+            struct_info: HashMap::new(),
             opt_level,
         })
     }
@@ -88,6 +91,44 @@ impl CodeGenerator {
                 // Obtenemos tanto el registro como el tipo (ej: "i64" o "i8*")
                 let (reg, tipo) = self.generate_expr(valor)?;
                 self.current_scope.insert(nombre.clone(), (reg, tipo));
+            }
+
+            // --- NUEVO: REGISTRAR UN STRUCT ---
+            Declaracion::Struct { nombre, campos, .. } => {
+                let mut mapa_campos = HashMap::new();
+                // Le asignamos un índice numérico a cada campo (0, 1, 2...)
+                for (indice, (nombre_campo, _tipo)) in campos.iter().enumerate() {
+                    mapa_campos.insert(nombre_campo.clone(), indice);
+                }
+                self.struct_info.insert(nombre.clone(), mapa_campos);
+            }
+
+            // --- NUEVO: MODIFICAR UNA PROPIEDAD (ej: heroe.vida = 100) ---
+            Declaracion::ReasignacionPropiedad { objeto, propiedad, valor } => {
+                // 1. Buscamos el objeto en la memoria local
+                if let Some((obj_reg, obj_tipo)) = self.current_scope.get(objeto).cloned() {
+                    // El tipo lo guardamos como "NombreStruct*"
+                    let nombre_struct = obj_tipo.trim_end_matches('*');
+
+                    // 2. Buscamos el índice de la propiedad en nuestro registro de Structs
+                    if let Some(mapa_campos) = self.struct_info.get(nombre_struct) {
+                        if let Some(&indice) = mapa_campos.get(propiedad) {
+
+                            // 3. Generamos el valor a guardar
+                            let (val_reg, _) = self.generate_expr(valor)?;
+
+                            // 4. Calculamos la dirección de memoria exacta y guardamos (store)
+                            let ptr_propiedad = self.new_reg();
+                            self.ir_code.push_str(&format!("  {} = getelementptr inbounds i64, i64* {}, i32 {}\n", ptr_propiedad, obj_reg, indice));
+                            self.ir_code.push_str(&format!("  store i64 {}, i64* {}\n", val_reg, ptr_propiedad));
+
+                        } else {
+                            return Err(format!("La propiedad '{}' no existe en el struct '{}'", propiedad, nombre_struct));
+                        }
+                    }
+                } else {
+                    return Err(format!("Objeto '{}' no encontrado", objeto));
+                }
             }
 
             // --- NUEVO: SOPORTE PARA FUNCIONES ---
@@ -240,6 +281,52 @@ impl CodeGenerator {
         match expr {
             Expresion::Entero(n) => {
                 Ok((n.to_string(), "i64".to_string()))
+            }
+            // --- NUEVO: INSTANCIAR UN STRUCT ---
+            Expresion::InstanciaStruct { nombre, campos } => {
+                let len = campos.len();
+                let struct_ptr = self.new_reg();
+
+                // 1. Pedimos memoria RAM (igual que un arreglo)
+                self.ir_code.push_str(&format!("  {} = alloca i64, i32 {}\n", struct_ptr, len));
+
+                // 2. Guardamos los valores iniciales
+                if let Some(mapa_campos) = self.struct_info.get(nombre).cloned() {
+                    for (nombre_campo, expr) in campos {
+                        if let Some(&indice) = mapa_campos.get(nombre_campo) {
+                            let (val_reg, _) = self.generate_expr(expr)?;
+                            let ptr_campo = self.new_reg();
+
+                            self.ir_code.push_str(&format!("  {} = getelementptr inbounds i64, i64* {}, i32 {}\n", ptr_campo, struct_ptr, indice));
+                            self.ir_code.push_str(&format!("  store i64 {}, i64* {}\n", val_reg, ptr_campo));
+                        }
+                    }
+                } else {
+                    return Err(format!("Struct '{}' no esta definido", nombre));
+                }
+
+                // Devolvemos el puntero y lo marcamos con el nombre del struct
+                Ok((struct_ptr, format!("{}*", nombre)))
+            }
+
+            // --- NUEVO: LEER UNA PROPIEDAD (ej: print heroe.vida) ---
+            Expresion::AccesoPropiedad { objeto, propiedad } => {
+                let (obj_reg, obj_tipo) = self.generate_expr(objeto)?;
+                let nombre_struct = obj_tipo.trim_end_matches('*');
+
+                if let Some(mapa_campos) = self.struct_info.get(nombre_struct) {
+                    if let Some(&indice) = mapa_campos.get(propiedad) {
+
+                        let ptr_campo = self.new_reg();
+                        self.ir_code.push_str(&format!("  {} = getelementptr inbounds i64, i64* {}, i32 {}\n", ptr_campo, obj_reg, indice));
+
+                        let val_reg = self.new_reg();
+                        self.ir_code.push_str(&format!("  {} = load i64, i64* {}\n", val_reg, ptr_campo));
+
+                        return Ok((val_reg, "i64".to_string()));
+                    }
+                }
+                Err(format!("Propiedad '{}' no encontrada en objeto tipo '{}'", propiedad, obj_tipo))
             }
             // --- NUEVO: SOPORTE PARA BOOLEANOS ---
             Expresion::Booleano(valor) => {
