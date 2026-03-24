@@ -1,7 +1,15 @@
 [package]
-name = "Kura"
+name = "kura"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[[bin]]
+name = "kura"
+path = "src/bin/kura.rs"
+
+[[bin]]
+name = "kup"
+path = "src/bin/kup.rs"
 
 [dependencies]
 # Para descargar librerías de internet

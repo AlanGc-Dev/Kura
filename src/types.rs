@@ -2,6 +2,7 @@
 use crate::evaluator::ObjetoKura;
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code, unused)]
 pub enum TipoKura {
     Entero,
     Cadena,

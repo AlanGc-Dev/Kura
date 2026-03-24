@@ -1,6 +1,0 @@
-fn recibir(x) {
-    print x;
-}
-
-let var = 50;
-recibir(var);

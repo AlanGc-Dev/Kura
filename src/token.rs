@@ -1,4 +1,5 @@
 #[derive(Debug, PartialEq, Clone)]
+#[allow(dead_code, unused)]
 pub enum Token {
     // Palabras clave
     Let,

@@ -1,0 +1,4 @@
+// Prueba simple para debugear el parser
+if 1 < 2 {
+    print 99;
+}

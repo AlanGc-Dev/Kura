@@ -1,0 +1,15 @@
+// Test 2: Control de flujo (if)
+let x = 10;
+let y = 20;
+
+if x < y {
+    print 1;
+} else {
+    print 0;
+}
+
+if x > y {
+    print 0;
+} else {
+    print 1;
+}

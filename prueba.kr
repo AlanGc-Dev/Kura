@@ -1,6 +1,0 @@
-// Kura ahora buscará automáticamente en 'kura_modules'
-import { sumar, cuadrado } from "matematicas";
-
-print "Usando libreria externa:";
-print sumar(10, 5);
-print cuadrado(4);

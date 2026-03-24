@@ -1,3 +1,5 @@
+#![allow(dead_code, unused)]
+
 use crate::token::Token;
 
 pub struct Lexer {
@@ -145,18 +147,28 @@ impl Lexer {
         while self.position < self.input.len() {
             let c = self.input[self.position];
 
-            // 🚀 Simplificado: is_whitespace() detecta espacios, tabs y saltos de línea
+            // 1. Manejo de espacios y SALTOS DE LÍNEA
             if c.is_whitespace() {
+                if c == '\n' {
+                    self.linea += 1;     // 🚀 ¡Vital! Subimos de línea
+                    self.columna = 1;    // Reiniciamos columna
+                } else {
+                    self.columna += 1;
+                }
                 self.position += 1;
             }
-            // Manejo de comentarios //
+            // 2. Manejo de comentarios //
             else if c == '/' && self.position + 1 < self.input.len() && self.input[self.position + 1] == '/' {
+                // Saltamos todo hasta el final de la línea
                 while self.position < self.input.len() && self.input[self.position] != '\n' {
                     self.position += 1;
+                    // No hace falta actualizar columna aquí porque la línea va a morir
                 }
+                // NOTA: No consumimos el '\n' aquí, dejamos que el bloque de arriba 
+                // lo maneje en la siguiente vuelta para que incremente self.linea.
             }
             else {
-                break; // Si no es espacio ni comentario, salimos del bucle
+                break;
             }
         }
     }

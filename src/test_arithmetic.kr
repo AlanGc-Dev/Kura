@@ -1,0 +1,11 @@
+// Test 1: Operaciones aritméticas
+let a = 100;
+let b = 25;
+let c = a + b;
+print c;
+
+let d = a - b;
+print d;
+
+let e = a * b;
+print e;

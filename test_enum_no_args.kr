@@ -1,7 +1,0 @@
-enum Status {
-    Success,
-    Failure
-}
-
-let resultado = Success;
-print resultado;

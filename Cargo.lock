@@ -3,15 +3,6 @@
 version = 4
 
 [[package]]
-name = "Kura"
-version = "0.1.0"
-dependencies = [
- "reqwest",
- "serde",
- "toml",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -484,6 +475,15 @@ checksum = "b49715b7073f385ba4bc528e5747d02e66cb39c6146efb66b781f131f0fb399c"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "kura"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "toml",
 ]
 
 [[package]]

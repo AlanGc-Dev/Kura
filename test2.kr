@@ -1,6 +1,0 @@
-let x: Entero = 5;
-print x;
-let s: Cadena = "hola";
-print s;
-let b: Booleano = true;
-print b;
