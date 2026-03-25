@@ -1,0 +1,16 @@
+// Benchmark 4: Complex (complejo con múltiples operaciones)
+let resultado = 1;
+let n = 10;
+let i = 1;
+while i <= n {
+    resultado = resultado * i;
+    i = i + 1;
+}
+let suma = 0;
+let j = 1;
+while j <= 50 {
+    suma = suma + j;
+    j = j + 1;
+}
+print resultado;
+

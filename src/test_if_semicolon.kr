@@ -1,9 +1,0 @@
-// Test correcto con ;  después de }
-let x = 10;
-let y = 20;
-
-if x < y {
-    print 1;
-} else {
-    print 0;
-};

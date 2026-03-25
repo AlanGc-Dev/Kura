@@ -1,0 +1,462 @@
+// ====================================================
+// parser.kr — Parser de KURA escrito en KURA
+// Convierte arreglo de tokens → AST (como dicts)
+// Fase 4: Bootstrapping
+// ====================================================
+
+// ── Utilidades del estado del parser ─────────────────
+
+fn parser_nuevo(tokens) {
+    return {"tokens": tokens, "pos": 0};
+}
+
+fn token_actual(p) {
+    return p["tokens"][p["pos"]];
+}
+
+fn token_siguiente(p) {
+    let sig = p["pos"] + 1;
+    if sig < len(p["tokens"]) {
+        return p["tokens"][sig];
+    }
+    return {"tipo": "FinDeArchivo", "valor": ""};
+}
+
+fn avanzar(p) {
+    p["pos"] = p["pos"] + 1;
+    return p;
+}
+
+fn tipo_actual(p) {
+    return token_actual(p)["tipo"];
+}
+
+fn valor_actual(p) {
+    return token_actual(p)["valor"];
+}
+
+fn esperar(p, tipo) {
+    if tipo_actual(p) == tipo {
+        return avanzar(p);
+    }
+    print "Error parser: se esperaba " + tipo + " pero se encontro " + tipo_actual(p);
+    return p;
+}
+
+fn saltar_si(p, tipo) {
+    if tipo_actual(p) == tipo {
+        return avanzar(p);
+    }
+    return p;
+}
+
+// ── Nodos AST ────────────────────────────────────────
+
+fn nodo(tipo, datos) {
+    datos["_nodo"] = tipo;
+    return datos;
+}
+
+// ── Parsear programa completo ─────────────────────────
+
+fn parsear_programa(tokens) {
+    let mut p = parser_nuevo(tokens);
+    let mut declaraciones = [];
+
+    while tipo_actual(p) != "FinDeArchivo" {
+        let resultado = parsear_declaracion(p);
+        p = resultado[0];
+        let decl = resultado[1];
+        if !has_key(decl, "_error") {
+            declaraciones = push(declaraciones, decl);
+        }
+    }
+
+    return nodo("Programa", {"cuerpo": declaraciones});
+}
+
+// ── Parsear declaraciones ─────────────────────────────
+
+fn parsear_declaracion(p) {
+    let t = tipo_actual(p);
+
+    if t == "Let"    { return parsear_let(p); }
+    if t == "Print"  { return parsear_print(p); }
+    if t == "If"     { return parsear_if(p); }
+    if t == "While"  { return parsear_while(p); }
+    if t == "For"    { return parsear_for(p); }
+    if t == "Fn"     { return parsear_funcion(p); }
+    if t == "Return" { return parsear_return(p); }
+    if t == "Break"  { p = avanzar(p); p = saltar_si(p, "PuntoYComa"); return [p, nodo("Break", {})]; }
+    if t == "Continue" { p = avanzar(p); p = saltar_si(p, "PuntoYComa"); return [p, nodo("Continue", {})]; }
+
+    if t == "Identificador" {
+        let sig = token_siguiente(p)["tipo"];
+        if sig == "Asignacion"          { return parsear_reasignacion(p); }
+        if sig == "AsignacionCompuesta" { return parsear_asig_compuesta(p); }
+        if sig == "ParentesisAbre"      { return parsear_llamada_suelta(p); }
+    }
+
+    // Token no reconocido: saltar
+    p = avanzar(p);
+    return [p, {"_error": true}];
+}
+
+// ── let [mut] nombre = expr; ──────────────────────────
+
+fn parsear_let(p) {
+    p = avanzar(p); // let
+    let mut es_mut = false;
+    if tipo_actual(p) == "Mut" {
+        es_mut = true;
+        p = avanzar(p);
+    }
+    let nombre = valor_actual(p);
+    p = avanzar(p); // nombre
+    p = saltar_si(p, "DosPuntos");
+    // saltar tipo opcional (ej: Entero)
+    if tipo_actual(p) == "Identificador" || tipo_actual(p) == "Tipo" {
+        p = avanzar(p);
+    }
+    p = esperar(p, "Asignacion");
+    let resultado = parsear_expresion(p);
+    p = resultado[0];
+    let expr = resultado[1];
+    p = saltar_si(p, "PuntoYComa");
+    return [p, nodo("Let", {"nombre": nombre, "mut": es_mut, "valor": expr})];
+}
+
+// ── print expr; ──────────────────────────────────────
+
+fn parsear_print(p) {
+    p = avanzar(p); // print
+    let resultado = parsear_expresion(p);
+    p = resultado[0];
+    let expr = resultado[1];
+    p = saltar_si(p, "PuntoYComa");
+    return [p, nodo("Print", {"valor": expr})];
+}
+
+// ── nombre = expr; ────────────────────────────────────
+
+fn parsear_reasignacion(p) {
+    let nombre = valor_actual(p);
+    p = avanzar(p); // nombre
+    p = avanzar(p); // =
+    let resultado = parsear_expresion(p);
+    p = resultado[0];
+    let expr = resultado[1];
+    p = saltar_si(p, "PuntoYComa");
+    return [p, nodo("Reasignacion", {"nombre": nombre, "valor": expr})];
+}
+
+// ── nombre += expr; ──────────────────────────────────
+
+fn parsear_asig_compuesta(p) {
+    let nombre = valor_actual(p);
+    p = avanzar(p); // nombre
+    p = avanzar(p); // +=
+    let resultado = parsear_expresion(p);
+    p = resultado[0];
+    let expr = resultado[1];
+    p = saltar_si(p, "PuntoYComa");
+    let suma = nodo("Operacion", {
+        "izq": nodo("Identificador", {"nombre": nombre}),
+        "op": "+",
+        "der": expr
+    });
+    return [p, nodo("Reasignacion", {"nombre": nombre, "valor": suma})];
+}
+
+// ── if cond { } else { } ─────────────────────────────
+
+fn parsear_if(p) {
+    p = avanzar(p); // if
+    let resultado = parsear_expresion(p);
+    p = resultado[0];
+    let cond = resultado[1];
+    let res_cons = parsear_bloque(p);
+    p = res_cons[0];
+    let cons = res_cons[1];
+    let mut alt = [];
+
+    if tipo_actual(p) == "Else" {
+        p = avanzar(p); // else
+        if tipo_actual(p) == "If" {
+            let res_if = parsear_if(p);
+            p = res_if[0];
+            alt = [res_if[1]];
+        } else {
+            let res_alt = parsear_bloque(p);
+            p = res_alt[0];
+            alt = res_alt[1];
+        }
+    }
+
+    return [p, nodo("If", {"cond": cond, "cons": cons, "alt": alt})];
+}
+
+// ── while cond { } ───────────────────────────────────
+
+fn parsear_while(p) {
+    p = avanzar(p); // while
+    let resultado = parsear_expresion(p);
+    p = resultado[0];
+    let cond = resultado[1];
+    let res_cuerpo = parsear_bloque(p);
+    p = res_cuerpo[0];
+    let cuerpo = res_cuerpo[1];
+    return [p, nodo("While", {"cond": cond, "cuerpo": cuerpo})];
+}
+
+// ── for variable in iterable { } ─────────────────────
+
+fn parsear_for(p) {
+    p = avanzar(p); // for
+    let variable = valor_actual(p);
+    p = avanzar(p); // nombre
+    p = esperar(p, "In");
+    let res_iter = parsear_expresion(p);
+    p = res_iter[0];
+    let iterable = res_iter[1];
+    let res_cuerpo = parsear_bloque(p);
+    p = res_cuerpo[0];
+    let cuerpo = res_cuerpo[1];
+    return [p, nodo("For", {"variable": variable, "iterable": iterable, "cuerpo": cuerpo})];
+}
+
+// ── fn nombre(params) { } ────────────────────────────
+
+fn parsear_funcion(p) {
+    p = avanzar(p); // fn
+    let nombre = valor_actual(p);
+    p = avanzar(p); // nombre
+    p = esperar(p, "ParentesisAbre");
+    let mut params = [];
+    while tipo_actual(p) != "ParentesisCierra" && tipo_actual(p) != "FinDeArchivo" {
+        if tipo_actual(p) == "Coma" { p = avanzar(p); continue; }
+        params = push(params, valor_actual(p));
+        p = avanzar(p);
+        // saltar tipo opcional
+        if tipo_actual(p) == "DosPuntos" {
+            p = avanzar(p);
+            p = avanzar(p);
+        }
+    }
+    p = esperar(p, "ParentesisCierra");
+    let res_cuerpo = parsear_bloque(p);
+    p = res_cuerpo[0];
+    let cuerpo = res_cuerpo[1];
+    return [p, nodo("Funcion", {"nombre": nombre, "params": params, "cuerpo": cuerpo})];
+}
+
+// ── return expr; ─────────────────────────────────────
+
+fn parsear_return(p) {
+    p = avanzar(p); // return
+    let resultado = parsear_expresion(p);
+    p = resultado[0];
+    let expr = resultado[1];
+    p = saltar_si(p, "PuntoYComa");
+    return [p, nodo("Return", {"valor": expr})];
+}
+
+// ── llamada_suelta(args); ────────────────────────────
+
+fn parsear_llamada_suelta(p) {
+    let nombre = valor_actual(p);
+    p = avanzar(p); // nombre
+    p = avanzar(p); // (
+    let mut args = [];
+    while tipo_actual(p) != "ParentesisCierra" && tipo_actual(p) != "FinDeArchivo" {
+        if tipo_actual(p) == "Coma" { p = avanzar(p); continue; }
+        let res_arg = parsear_expresion(p);
+        p = res_arg[0];
+        args = push(args, res_arg[1]);
+    }
+    p = esperar(p, "ParentesisCierra");
+    p = saltar_si(p, "PuntoYComa");
+    return [p, nodo("LlamadaSuelta", {"nombre": nombre, "args": args})];
+}
+
+// ── Bloque { decl* } ─────────────────────────────────
+
+fn parsear_bloque(p) {
+    p = esperar(p, "LlaveAbre");
+    let mut decls = [];
+    while tipo_actual(p) != "LlaveCierra" && tipo_actual(p) != "FinDeArchivo" {
+        let resultado = parsear_declaracion(p);
+        p = resultado[0];
+        let decl = resultado[1];
+        if !has_key(decl, "_error") {
+            decls = push(decls, decl);
+        }
+    }
+    p = esperar(p, "LlaveCierra");
+    return [p, decls];
+}
+
+// ── Expresiones ───────────────────────────────────────
+
+fn parsear_expresion(p) {
+    let res_izq = parsear_expresion_primaria(p);
+    p = res_izq[0];
+    let mut izq = res_izq[1];
+
+    // Bucle para operadores binarios
+    while tipo_actual(p) == "Suma"          || tipo_actual(p) == "Resta"     ||
+          tipo_actual(p) == "Multiplicacion" || tipo_actual(p) == "Division"  ||
+          tipo_actual(p) == "Modulo"         || tipo_actual(p) == "Potencia"  ||
+          tipo_actual(p) == "Igualdad"       || tipo_actual(p) == "Diferente" ||
+          tipo_actual(p) == "MenorQue"       || tipo_actual(p) == "MayorQue"  ||
+          tipo_actual(p) == "MenorIgual"     || tipo_actual(p) == "MayorIgual"||
+          tipo_actual(p) == "And"            || tipo_actual(p) == "Or" {
+
+        let op = valor_actual(p);
+        p = avanzar(p);
+        let res_der = parsear_expresion_primaria(p);
+        p = res_der[0];
+        let der = res_der[1];
+        izq = nodo("Operacion", {"izq": izq, "op": op, "der": der});
+    }
+
+    return [p, izq];
+}
+
+fn parsear_expresion_primaria(p) {
+    let t = tipo_actual(p);
+    let v = valor_actual(p);
+
+    // Literales
+    if t == "Entero"   { p = avanzar(p); return [p, nodo("Entero",   {"valor": v})]; }
+    if t == "Flotante" { p = avanzar(p); return [p, nodo("Flotante",  {"valor": v})]; }
+    if t == "Cadena"   { p = avanzar(p); return [p, nodo("Cadena",   {"valor": v})]; }
+    if t == "True"     { p = avanzar(p); return [p, nodo("Booleano", {"valor": "true"})]; }
+    if t == "False"    { p = avanzar(p); return [p, nodo("Booleano", {"valor": "false"})]; }
+    if t == "Null"     { p = avanzar(p); return [p, nodo("Nulo",     {})]; }
+
+    // Negación booleana !expr
+    if t == "Not" {
+        p = avanzar(p);
+        let res = parsear_expresion_primaria(p);
+        p = res[0];
+        let expr = res[1];
+        return [p, nodo("Operacion", {"izq": expr, "op": "==", "der": nodo("Booleano", {"valor": "false"})})];
+    }
+
+    // Arreglo [...]
+    if t == "CorcheteAbre" {
+        p = avanzar(p);
+        let mut elems = [];
+        while tipo_actual(p) != "CorcheteCierra" && tipo_actual(p) != "FinDeArchivo" {
+            if tipo_actual(p) == "Coma" { p = avanzar(p); continue; }
+            let res_e = parsear_expresion(p);
+            p = res_e[0];
+            elems = push(elems, res_e[1]);
+        }
+        p = esperar(p, "CorcheteCierra");
+        return [p, nodo("Arreglo", {"elementos": elems})];
+    }
+
+    // Diccionario {...}
+    if t == "LlaveAbre" {
+        p = avanzar(p);
+        let mut pares = [];
+        while tipo_actual(p) != "LlaveCierra" && tipo_actual(p) != "FinDeArchivo" {
+            if tipo_actual(p) == "Coma" { p = avanzar(p); continue; }
+            let clave = valor_actual(p);
+            p = avanzar(p);
+            p = esperar(p, "DosPuntos");
+            let res_v = parsear_expresion(p);
+            p = res_v[0];
+            pares = push(pares, [clave, res_v[1]]);
+        }
+        p = esperar(p, "LlaveCierra");
+        return [p, nodo("Diccionario", {"pares": pares})];
+    }
+
+    // Identificador, llamada o acceso
+    if t == "Identificador" {
+        let nombre = v;
+        p = avanzar(p);
+
+        // Llamada a función nombre(args)
+        if tipo_actual(p) == "ParentesisAbre" {
+            p = avanzar(p);
+            let mut args = [];
+            while tipo_actual(p) != "ParentesisCierra" && tipo_actual(p) != "FinDeArchivo" {
+                if tipo_actual(p) == "Coma" { p = avanzar(p); continue; }
+                let res_a = parsear_expresion(p);
+                p = res_a[0];
+                args = push(args, res_a[1]);
+            }
+            p = esperar(p, "ParentesisCierra");
+            let mut expr = nodo("Llamada", {"nombre": nombre, "args": args});
+
+            // Encadenamiento .propiedad o [indice]
+            while tipo_actual(p) == "Punto" || tipo_actual(p) == "CorcheteAbre" {
+                if tipo_actual(p) == "Punto" {
+                    p = avanzar(p);
+                    let prop = valor_actual(p);
+                    p = avanzar(p);
+                    expr = nodo("AccesoPropiedad", {"objeto": expr, "prop": prop});
+                } else {
+                    p = avanzar(p);
+                    let res_i = parsear_expresion(p);
+                    p = res_i[0];
+                    let idx = res_i[1];
+                    p = esperar(p, "CorcheteCierra");
+                    expr = nodo("Indice", {"estructura": expr, "indice": idx});
+                }
+            }
+            return [p, expr];
+        }
+
+        // Acceso a índice nombre[expr]
+        if tipo_actual(p) == "CorcheteAbre" {
+            p = avanzar(p);
+            let res_i = parsear_expresion(p);
+            p = res_i[0];
+            let idx = res_i[1];
+            p = esperar(p, "CorcheteCierra");
+            let mut expr = nodo("Indice", {"estructura": nodo("Identificador", {"nombre": nombre}), "indice": idx});
+
+            // Encadenamiento adicional
+            while tipo_actual(p) == "CorcheteAbre" {
+                p = avanzar(p);
+                let res_i2 = parsear_expresion(p);
+                p = res_i2[0];
+                let idx2 = res_i2[1];
+                p = esperar(p, "CorcheteCierra");
+                expr = nodo("Indice", {"estructura": expr, "indice": idx2});
+            }
+            return [p, expr];
+        }
+
+        return [p, nodo("Identificador", {"nombre": nombre})];
+    }
+
+    // Expresión entre paréntesis
+    if t == "ParentesisAbre" {
+        p = avanzar(p);
+        let res = parsear_expresion(p);
+        p = res[0];
+        let expr = res[1];
+        p = esperar(p, "ParentesisCierra");
+        return [p, expr];
+    }
+
+    // Número negativo -n
+    if t == "Resta" {
+        p = avanzar(p);
+        let res = parsear_expresion_primaria(p);
+        p = res[0];
+        let expr = res[1];
+        return [p, nodo("Negativo", {"valor": expr})];
+    }
+
+    // Nodo de error
+    p = avanzar(p);
+    return [p, {"_error": true, "token": t}];
+}
+

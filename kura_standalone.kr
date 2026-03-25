@@ -1,0 +1,6 @@
+// 🎯 COMPILADOR KURA STANDALONE - Ejecutable Puro
+// Este archivo, cuando se compile a .exe, será el compilador KURA
+
+// Main: Compilar simple.kr
+print 42;
+

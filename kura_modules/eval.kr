@@ -1,0 +1,289 @@
+// ====================================================
+// eval.kr — Evaluador de KURA escrito en KURA
+// Interpreta el AST generado por parser.kr
+// Fase 4: Bootstrapping
+// ====================================================
+
+// ── Entorno (scope) como diccionario ─────────────────
+
+fn entorno_nuevo() {
+    return {"__vars": {}};
+}
+
+fn entorno_guardar(env, nombre, valor) {
+    env["__vars"][nombre] = valor;
+    return env;
+}
+
+fn entorno_obtener(env, nombre) {
+    if has_key(env["__vars"], nombre) {
+        return env["__vars"][nombre];
+    }
+    return null;
+}
+
+// ── Evaluar un programa completo ─────────────────────
+
+fn evaluar_programa(ast, env) {
+    let cuerpo = ast["cuerpo"];
+    let mut i = 0;
+    while i < len(cuerpo) {
+        let res = evaluar_decl(cuerpo[i], env);
+        env = res[0];
+        i += 1;
+    }
+    return env;
+}
+
+// ── Evaluar una declaración ───────────────────────────
+
+fn evaluar_decl(nodo, env) {
+    let tipo = nodo["_nodo"];
+
+    if tipo == "Let" {
+        let val = evaluar_expr(nodo["valor"], env);
+        env = entorno_guardar(env, nodo["nombre"], val);
+        return [env, null];
+    }
+
+    if tipo == "Reasignacion" {
+        let val = evaluar_expr(nodo["valor"], env);
+        env["__vars"][nodo["nombre"]] = val;
+        return [env, null];
+    }
+
+    if tipo == "Print" {
+        let val = evaluar_expr(nodo["valor"], env);
+        print val;
+        return [env, null];
+    }
+
+    if tipo == "If" {
+        let cond = evaluar_expr(nodo["cond"], env);
+        if cond {
+            let res = evaluar_bloque(nodo["cons"], env);
+            env = res[0];
+        } else {
+            let alt = nodo["alt"];
+            if len(alt) > 0 {
+                let res = evaluar_bloque(alt, env);
+                env = res[0];
+            }
+        }
+        return [env, null];
+    }
+
+    if tipo == "While" {
+        let mut seguir = true;
+        while seguir {
+            let cond = evaluar_expr(nodo["cond"], env);
+            if cond {
+                let res = evaluar_bloque(nodo["cuerpo"], env);
+                env = res[0];
+            } else {
+                seguir = false;
+            }
+        }
+        return [env, null];
+    }
+
+    if tipo == "For" {
+        let iter = evaluar_expr(nodo["iterable"], env);
+        let mut idx = 0;
+        while idx < len(iter) {
+            env = entorno_guardar(env, nodo["variable"], iter[idx]);
+            let res = evaluar_bloque(nodo["cuerpo"], env);
+            env = res[0];
+            idx += 1;
+        }
+        return [env, null];
+    }
+
+    if tipo == "Funcion" {
+        env = entorno_guardar(env, nodo["nombre"], nodo);
+        return [env, null];
+    }
+
+    if tipo == "LlamadaSuelta" {
+        let _ = evaluar_llamada(nodo["nombre"], nodo["args"], env);
+        return [env, null];
+    }
+
+    if tipo == "Return" {
+        let val = evaluar_expr(nodo["valor"], env);
+        return [env, {"__return": val}];
+    }
+
+    if tipo == "Break"    { return [env, {"__break": true}]; }
+    if tipo == "Continue" { return [env, {"__continue": true}]; }
+
+    return [env, null];
+}
+
+// ── Evaluar un bloque de declaraciones ───────────────
+
+fn evaluar_bloque(decls, env) {
+    let mut i = 0;
+    while i < len(decls) {
+        let res = evaluar_decl(decls[i], env);
+        env = res[0];
+        let ctrl = res[1];
+        if ctrl != null {
+            if has_key(ctrl, "__return")   { return [env, ctrl]; }
+            if has_key(ctrl, "__break")    { return [env, ctrl]; }
+            if has_key(ctrl, "__continue") { return [env, ctrl]; }
+        }
+        i += 1;
+    }
+    return [env, null];
+}
+
+// ── Evaluar una llamada a función ────────────────────
+
+fn evaluar_llamada(nombre, args_ast, env) {
+    // Evaluar argumentos
+    let mut args_eval = [];
+    let mut i = 0;
+    while i < len(args_ast) {
+        args_eval = push(args_eval, evaluar_expr(args_ast[i], env));
+        i += 1;
+    }
+
+    // Funciones nativas
+    if nombre == "print"    { print args_eval[0]; return null; }
+    if nombre == "len"      { return len(args_eval[0]); }
+    if nombre == "push"     { return push(args_eval[0], args_eval[1]); }
+    if nombre == "pop"      { return pop(args_eval[0]); }
+    if nombre == "char_at"  { return char_at(args_eval[0], args_eval[1]); }
+    if nombre == "chars"    { return chars(args_eval[0]); }
+    if nombre == "substring"{ return substring(args_eval[0], args_eval[1], args_eval[2]); }
+    if nombre == "is_digit" { return is_digit(args_eval[0]); }
+    if nombre == "is_alpha" { return is_alpha(args_eval[0]); }
+    if nombre == "is_alphanum" { return is_alphanum(args_eval[0]); }
+    if nombre == "is_whitespace" { return is_whitespace(args_eval[0]); }
+    if nombre == "ord"      { return ord(args_eval[0]); }
+    if nombre == "chr"      { return chr(args_eval[0]); }
+    if nombre == "has_key"  { return has_key(args_eval[0], args_eval[1]); }
+    if nombre == "keys"     { return keys(args_eval[0]); }
+    if nombre == "join"     { return join(args_eval[0], args_eval[1]); }
+    if nombre == "split"    { return split(args_eval[0], args_eval[1]); }
+    if nombre == "trim"     { return trim(args_eval[0]); }
+    if nombre == "contains" { return contains(args_eval[0], args_eval[1]); }
+    if nombre == "starts_with" { return starts_with(args_eval[0], args_eval[1]); }
+    if nombre == "ends_with"   { return ends_with(args_eval[0], args_eval[1]); }
+    if nombre == "replace"  { return replace(args_eval[0], args_eval[1], args_eval[2]); }
+    if nombre == "parse_int"{ return parse_int(args_eval[0]); }
+    if nombre == "a_texto"  { return a_texto(args_eval[0]); }
+    if nombre == "read_file"  { return read_file(args_eval[0]); }
+    if nombre == "write_file" { return write_file(args_eval[0], args_eval[1]); }
+
+    // Función de usuario
+    let fn_nodo = entorno_obtener(env, nombre);
+    if fn_nodo == null { print "Error: funcion no definida: " + nombre; return null; }
+
+    let params = fn_nodo["params"];
+    let mut env_local = entorno_nuevo();
+    // Heredar variables del entorno padre
+    let ks = keys(env["__vars"]);
+    let mut ki = 0;
+    while ki < len(ks) {
+        let k = ks[ki];
+        env_local = entorno_guardar(env_local, k, env["__vars"][k]);
+        ki += 1;
+    }
+    // Vincular parámetros
+    let mut pi = 0;
+    while pi < len(params) {
+        env_local = entorno_guardar(env_local, params[pi], args_eval[pi]);
+        pi += 1;
+    }
+
+    let res = evaluar_bloque(fn_nodo["cuerpo"], env_local);
+    let ctrl = res[1];
+    if ctrl != null {
+        if has_key(ctrl, "__return") { return ctrl["__return"]; }
+    }
+    return null;
+}
+
+// ── Evaluar expresiones ───────────────────────────────
+
+fn evaluar_expr(nodo, env) {
+    let tipo = nodo["_nodo"];
+
+    if tipo == "Entero"   { return parse_int(nodo["valor"]); }
+    if tipo == "Flotante" { return parse_float(nodo["valor"]); }
+    if tipo == "Cadena"   { return nodo["valor"]; }
+    if tipo == "Booleano" { return nodo["valor"] == "true"; }
+    if tipo == "Nulo"     { return null; }
+
+    if tipo == "Identificador" {
+        let val = entorno_obtener(env, nodo["nombre"]);
+        return val;
+    }
+
+    if tipo == "Arreglo" {
+        let mut arr = [];
+        let elems = nodo["elementos"];
+        let mut i = 0;
+        while i < len(elems) {
+            arr = push(arr, evaluar_expr(elems[i], env));
+            i += 1;
+        }
+        return arr;
+    }
+
+    if tipo == "Diccionario" {
+        let mut dic = {};
+        let pares = nodo["pares"];
+        let mut i = 0;
+        while i < len(pares) {
+            let par = pares[i];
+            dic[par[0]] = evaluar_expr(par[1], env);
+            i += 1;
+        }
+        return dic;
+    }
+
+    if tipo == "Indice" {
+        let estructura = evaluar_expr(nodo["estructura"], env);
+        let idx = evaluar_expr(nodo["indice"], env);
+        return estructura[idx];
+    }
+
+    if tipo == "AccesoPropiedad" {
+        let obj = evaluar_expr(nodo["objeto"], env);
+        return obj[nodo["prop"]];
+    }
+
+    if tipo == "Llamada" {
+        return evaluar_llamada(nodo["nombre"], nodo["args"], env);
+    }
+
+    if tipo == "Negativo" {
+        return 0 - evaluar_expr(nodo["valor"], env);
+    }
+
+    if tipo == "Operacion" {
+        let izq = evaluar_expr(nodo["izq"], env);
+        let der = evaluar_expr(nodo["der"], env);
+        let op = nodo["op"];
+        if op == "+"  { return izq + der; }
+        if op == "-"  { return izq - der; }
+        if op == "*"  { return izq * der; }
+        if op == "/"  { return izq / der; }
+        if op == "%"  { return izq % der; }
+        if op == "**" { return izq ** der; }
+        if op == "==" { return izq == der; }
+        if op == "!=" { return izq != der; }
+        if op == "<"  { return izq < der; }
+        if op == ">"  { return izq > der; }
+        if op == "<=" { return izq <= der; }
+        if op == ">=" { return izq >= der; }
+        if op == "&&" { return izq && der; }
+        if op == "||" { return izq || der; }
+    }
+
+    return null;
+}
+

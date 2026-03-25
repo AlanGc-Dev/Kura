@@ -1,0 +1,48 @@
+// ====================================================
+// kura_bootstrap.kr — Compilador de KURA escrito en KURA
+// Uso: kura kura_bootstrap.kr <archivo.kr>
+// Fase 4: Bootstrapping completo
+// ====================================================
+
+import { tokenizar, mk } from "lexer.kr";
+import { parsear_programa } from "parser.kr";
+import { evaluar_programa, entorno_nuevo } from "eval.kr";
+
+fn main() {
+    // Leer el archivo fuente pasado por variable global o hardcoded para test
+    let fuente = read_file("src/test_bootstrap.kr");
+
+    if fuente == null {
+        print "Error: no se pudo leer el archivo fuente.";
+        return null;
+    }
+
+    // ── Fase 1: Lexer ──────────────────────────────
+    print "=== Fase 1: Tokenizando... ===";
+    let tokens = tokenizar(fuente);
+    print "Tokens generados: " + len(tokens);
+
+    // Mostrar primeros 10 tokens
+    let mut i = 0;
+    while i < 10 && i < len(tokens) {
+        let t = tokens[i];
+        print "  [" + i + "] " + t["tipo"] + " -> " + t["valor"];
+        i += 1;
+    }
+
+    // ── Fase 2: Parser ─────────────────────────────
+    print "=== Fase 2: Parseando... ===";
+    let ast = parsear_programa(tokens);
+    let n_decls = len(ast["cuerpo"]);
+    print "Declaraciones en AST: " + n_decls;
+
+    // ── Fase 3: Evaluador ──────────────────────────
+    print "=== Fase 3: Ejecutando... ===";
+    let env = entorno_nuevo();
+    evaluar_programa(ast, env);
+
+    print "=== Bootstrap completado ===";
+}
+
+main();
+

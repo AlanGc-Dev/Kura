@@ -1,0 +1,16 @@
+// test_lexer_bootstrap.kr
+// Prueba del lexer escrito en KURA
+
+import { tokenizar } from "lexer.kr";
+
+let codigo = "let x = 42; print x + 1;";
+let tokens = tokenizar(codigo);
+
+print "Tokens generados:";
+let mut i = 0;
+while i < len(tokens) {
+    let t = tokens[i];
+    print t["tipo"] + " : " + t["valor"];
+    i += 1;
+}
+

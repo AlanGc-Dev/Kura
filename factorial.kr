@@ -1,0 +1,12 @@
+// Programa de prueba KURA - Factorial y operaciones
+let n = 5;
+let resultado = 1;
+let contador = 1;
+
+while contador <= n {
+    resultado = resultado * contador;
+    contador = contador + 1;
+}
+
+print resultado;
+

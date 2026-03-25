@@ -1,0 +1,9 @@
+// Programa: Potencias de 2 (1 a 1024)
+let n = 1;
+
+while n <= 1024 {
+    n = n * 2;
+}
+
+print n;
+

@@ -1,0 +1,3 @@
+// Benchmark 1: Trivial (muy simple)
+print 1;
+

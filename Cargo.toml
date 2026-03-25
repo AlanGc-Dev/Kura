@@ -2,14 +2,18 @@
 name = "kura"
 version = "0.1.0"
 edition = "2021"
+default-run = "kura"
+
+[lib]
+path = "language/lib.rs"
 
 [[bin]]
 name = "kura"
-path = "src/bin/kura.rs"
+path = "language/bin/kura.rs"
 
 [[bin]]
 name = "kup"
-path = "src/bin/kup.rs"
+path = "language/bin/kup.rs"
 
 [dependencies]
 # Para descargar librerías de internet

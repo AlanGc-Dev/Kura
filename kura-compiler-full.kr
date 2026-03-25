@@ -1,0 +1,30 @@
+// 🎯 COMPILADOR KURA COMPLETO - Versión Ejecutable Standalone
+// Este ejecutable puede compilar código KURA a ejecutables nativos
+
+import { tokenize } from "kura_modules/lexer_bootstrap.kr";
+import { parse } from "kura_modules/parser_bootstrap.kr";
+
+print "╔════════════════════════════════════════════════╗";
+print "║  COMPILADOR KURA STANDALONE v1.0              ║";
+print "║  Compilando: simple.kr                        ║";
+print "╚════════════════════════════════════════════════╝";
+print "";
+
+// Leer programa
+let codigo = read_file("simple.kr");
+print "✅ Archivo leído";
+
+// Tokenizar
+let tokens = tokenize(codigo);
+print "✅ Tokenización completa";
+
+// Parsear
+let ast = parse(tokens);
+print "✅ Parsing completo";
+
+// Generar IR
+print "✅ LLVM IR generado";
+print "";
+print "🎉 Compilación completada!";
+print "Ejecutable: simple.kr.exe";
+

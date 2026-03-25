@@ -1,0 +1,155 @@
+// ====================================================
+// lexer.kr — Tokenizador de KURA escrito en KURA
+// Fase 4: Bootstrapping
+// ====================================================
+
+// Tabla de palabras clave → tipo de token
+fn tipo_de_keyword(ident) {
+    let kws = {
+        "let": "Let",       "mut": "Mut",      "fn": "Fn",
+        "fun": "Fn",        "if": "If",        "else": "Else",
+        "while": "While",   "for": "For",      "in": "In",
+        "return": "Return", "break": "Break",  "continue": "Continue",
+        "true": "True",     "false": "False",  "print": "Print",
+        "import": "Import", "export": "Export","from": "From",
+        "struct": "Struct", "enum": "Enum",    "match": "Match",
+        "new": "New",       "delete": "Delete","null": "Null",
+        "as": "As"
+    };
+    if has_key(kws, ident) {
+        return kws[ident];
+    }
+    return "Identificador";
+}
+
+// Crea un token dict con tipo y valor
+fn mk(tipo, valor) {
+    return {"tipo": tipo, "valor": valor};
+}
+
+// Función principal: convierte código fuente en arreglo de tokens
+fn tokenizar(fuente) {
+    let mut tokens = [];
+    let mut pos = 0;
+    let largo = len(fuente);
+
+    while pos < largo {
+        let c = char_at(fuente, pos);
+
+        // ── Espacios en blanco ──────────────────────────────
+        if is_whitespace(c) {
+            pos += 1;
+            continue;
+        }
+
+        // ── Comentarios de línea // ─────────────────────────
+        if c == "/" && pos + 1 < largo && char_at(fuente, pos + 1) == "/" {
+            while pos < largo && char_at(fuente, pos) != "\n" {
+                pos += 1;
+            }
+            continue;
+        }
+
+        // ── Cadenas de texto "..." ──────────────────────────
+        if c == "\"" {
+            pos += 1;
+            let mut s = "";
+            while pos < largo && char_at(fuente, pos) != "\"" {
+                let sc = char_at(fuente, pos);
+                if sc == "\\" && pos + 1 < largo {
+                    pos += 1;
+                    let esc = char_at(fuente, pos);
+                    if esc == "n" { s = s + "\n"; }
+                    else if esc == "t" { s = s + "\t"; }
+                    else if esc == "r" { s = s + "\r"; }
+                    else { s = s + esc; }
+                } else {
+                    s = s + sc;
+                }
+                pos += 1;
+            }
+            if pos < largo { pos += 1; } // cerrar "
+            tokens = push(tokens, mk("Cadena", s));
+            continue;
+        }
+
+        // ── Números enteros y flotantes ─────────────────────
+        if is_digit(c) {
+            let mut num = "";
+            while pos < largo && is_digit(char_at(fuente, pos)) {
+                num = num + char_at(fuente, pos);
+                pos += 1;
+            }
+            // ¿Flotante? (ej: 3.14)
+            if pos < largo && char_at(fuente, pos) == "." && pos + 1 < largo && is_digit(char_at(fuente, pos + 1)) {
+                num = num + ".";
+                pos += 1;
+                while pos < largo && is_digit(char_at(fuente, pos)) {
+                    num = num + char_at(fuente, pos);
+                    pos += 1;
+                }
+                tokens = push(tokens, mk("Flotante", num));
+            } else {
+                tokens = push(tokens, mk("Entero", num));
+            }
+            continue;
+        }
+
+        // ── Identificadores y palabras clave ────────────────
+        if is_alpha(c) || c == "_" {
+            let mut ident = "";
+            while pos < largo && is_alphanum(char_at(fuente, pos)) {
+                ident = ident + char_at(fuente, pos);
+                pos += 1;
+            }
+            tokens = push(tokens, mk(tipo_de_keyword(ident), ident));
+            continue;
+        }
+
+        // ── Operadores de DOS caracteres (verificar primero) ─
+        if pos + 1 < largo {
+            let c2 = char_at(fuente, pos + 1);
+
+            if c == "=" && c2 == "=" { tokens = push(tokens, mk("Igualdad",         "==")); pos += 2; continue; }
+            if c == "=" && c2 == ">" { tokens = push(tokens, mk("FlechaGrande",     "=>")); pos += 2; continue; }
+            if c == "!" && c2 == "=" { tokens = push(tokens, mk("Diferente",        "!=")); pos += 2; continue; }
+            if c == "<" && c2 == "=" { tokens = push(tokens, mk("MenorIgual",       "<=")); pos += 2; continue; }
+            if c == ">" && c2 == "=" { tokens = push(tokens, mk("MayorIgual",       ">=")); pos += 2; continue; }
+            if c == "&" && c2 == "&" { tokens = push(tokens, mk("And",              "&&")); pos += 2; continue; }
+            if c == "|" && c2 == "|" { tokens = push(tokens, mk("Or",              "||")); pos += 2; continue; }
+            if c == "+" && c2 == "=" { tokens = push(tokens, mk("AsignacionCompuesta", "+=")); pos += 2; continue; }
+            if c == "*" && c2 == "*" { tokens = push(tokens, mk("Potencia",         "**")); pos += 2; continue; }
+            if c == "-" && c2 == ">" { tokens = push(tokens, mk("Flecha",           "->")); pos += 2; continue; }
+        }
+
+        // ── Operadores de UN carácter ────────────────────────
+        if c == "=" { tokens = push(tokens, mk("Asignacion",      "="));  pos += 1; continue; }
+        if c == "<" { tokens = push(tokens, mk("MenorQue",        "<"));  pos += 1; continue; }
+        if c == ">" { tokens = push(tokens, mk("MayorQue",        ">"));  pos += 1; continue; }
+        if c == "!" { tokens = push(tokens, mk("Not",             "!"));  pos += 1; continue; }
+        if c == "+" { tokens = push(tokens, mk("Suma",            "+"));  pos += 1; continue; }
+        if c == "-" { tokens = push(tokens, mk("Resta",           "-"));  pos += 1; continue; }
+        if c == "*" { tokens = push(tokens, mk("Multiplicacion",  "*"));  pos += 1; continue; }
+        if c == "/" { tokens = push(tokens, mk("Division",        "/"));  pos += 1; continue; }
+        if c == "%" { tokens = push(tokens, mk("Modulo",          "%"));  pos += 1; continue; }
+        if c == "(" { tokens = push(tokens, mk("ParentesisAbre",  "("));  pos += 1; continue; }
+        if c == ")" { tokens = push(tokens, mk("ParentesisCierra",")")); pos += 1; continue; }
+        if c == "{" { tokens = push(tokens, mk("LlaveAbre",       "{"));  pos += 1; continue; }
+        if c == "}" { tokens = push(tokens, mk("LlaveCierra",     "}"));  pos += 1; continue; }
+        if c == "[" { tokens = push(tokens, mk("CorcheteAbre",    "["));  pos += 1; continue; }
+        if c == "]" { tokens = push(tokens, mk("CorcheteCierra",  "]")); pos += 1; continue; }
+        if c == ";" { tokens = push(tokens, mk("PuntoYComa",      ";"));  pos += 1; continue; }
+        if c == "," { tokens = push(tokens, mk("Coma",            ","));  pos += 1; continue; }
+        if c == ":" { tokens = push(tokens, mk("DosPuntos",       ":"));  pos += 1; continue; }
+        if c == "." { tokens = push(tokens, mk("Punto",           "."));  pos += 1; continue; }
+        if c == "&" { tokens = push(tokens, mk("Ampersand",       "&"));  pos += 1; continue; }
+
+        // Carácter desconocido
+        tokens = push(tokens, mk("Ilegal", c));
+        pos += 1;
+    }
+
+    tokens = push(tokens, mk("FinDeArchivo", ""));
+    return tokens;
+}
+
